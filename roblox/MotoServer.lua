@@ -11,7 +11,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 local Workspace = game:GetService("Workspace")
 
-local VERSIONE = 2
+local VERSIONE = 3
 
 local function log(...)
 	print("[Moto]", ...)
@@ -391,6 +391,47 @@ eventoScendi.OnServerEvent:Connect(function(giocatore)
 	end
 end)
 
+-- corpo slanciato: piu' alto e piu' sottile, in proporzione con la moto (1 stud = 0,28 m)
+-- Cambio i valori di scala dell'Humanoid: Roblox ridimensiona il corpo senza rifare le articolazioni.
+local SCALA_CORPO = {
+	BodyHeightScale = 1.3,
+	BodyWidthScale = 0.8,
+	BodyDepthScale = 0.8,
+	HeadScale = 0.9,
+}
+
+local function slancia(giocatore, char)
+	local hum = char:WaitForChild("Humanoid", 10)
+	if not hum then
+		return
+	end
+	if hum.RigType ~= Enum.HumanoidRigType.R15 then
+		warn("[Moto] " .. giocatore.Name .. " ha un personaggio R6: corpo slanciato e posa servono R15 "
+			.. "(Game Settings > Avatar > Avatar Type: R15).")
+		return
+	end
+	if not giocatore:HasAppearanceLoaded() then
+		giocatore.CharacterAppearanceLoaded:Wait()
+	end
+	if char.Parent == nil then
+		return
+	end
+	hum.AutomaticScalingEnabled = true
+	for nome, valore in pairs(SCALA_CORPO) do
+		local nv = hum:FindFirstChild(nome)
+		if not nv then
+			nv = Instance.new("NumberValue")
+			nv.Name = nome
+			nv.Parent = hum
+		end
+		nv.Value = valore
+	end
+	char:SetAttribute("Slanciato", true)
+	log(string.format("Corpo slanciato per %s: altezza x%.2f, larghezza x%.2f, profondita' x%.2f, testa x%.2f",
+		giocatore.Name, SCALA_CORPO.BodyHeightScale, SCALA_CORPO.BodyWidthScale,
+		SCALA_CORPO.BodyDepthScale, SCALA_CORPO.HeadScale))
+end
+
 -- una moto per ogni giocatore, 10 stud davanti a dove nasce (la prima volta)
 local function motoDelGiocatore(giocatore)
 	local nome = "Moto_" .. giocatore.Name
@@ -419,25 +460,24 @@ local function motoDelGiocatore(giocatore)
 	return moto
 end
 
-Players.PlayerAdded:Connect(function(giocatore)
-	giocatore.CharacterAdded:Connect(function()
-		task.wait(0.5)
-		motoDelGiocatore(giocatore)
+local function nuovoPersonaggio(giocatore, char)
+	task.spawn(slancia, giocatore, char)
+	task.wait(0.5)
+	motoDelGiocatore(giocatore)
+end
+
+local function collegaGiocatore(giocatore)
+	giocatore.CharacterAdded:Connect(function(char)
+		nuovoPersonaggio(giocatore, char)
 	end)
 	if giocatore.Character then
-		motoDelGiocatore(giocatore)
+		task.spawn(nuovoPersonaggio, giocatore, giocatore.Character)
 	end
-end)
+end
+
+Players.PlayerAdded:Connect(collegaGiocatore)
 for _, giocatore in ipairs(Players:GetPlayers()) do
-	task.spawn(function()
-		if giocatore.Character then
-			motoDelGiocatore(giocatore)
-		end
-		giocatore.CharacterAdded:Connect(function()
-			task.wait(0.5)
-			motoDelGiocatore(giocatore)
-		end)
-	end)
+	collegaGiocatore(giocatore)
 end
 
 Players.PlayerRemoving:Connect(function(giocatore)

@@ -4,6 +4,8 @@
 --   W = gas, S = freno, A / D = sterzo, E = scendi (anche Spazio).
 -- Muove anche le parti di TUTTE le moto: ruote che girano, manubrio che sterza,
 -- forcella e forcellone che ammortizzano, piega in curva.
+-- Mette i piloti in posa (ReplicatedStorage > PosaPilota): mani sulle manopole, piedi sulle pedane,
+-- e il corpo si muove: indietro quando accelera, avanti quando frena, dentro le curve, molleggia.
 -- Nell'Output le righe di questo script iniziano con [Moto].
 
 local Players = game:GetService("Players")
@@ -12,10 +14,11 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
-local VERSIONE = 2
+local VERSIONE = 3
 local giocatore = Players.LocalPlayer
 local cartella = Workspace:WaitForChild("Moto")
 local eventoScendi = ReplicatedStorage:WaitForChild("MotoScendi")
+local Posa = require(ReplicatedStorage:WaitForChild("PosaPilota"))
 
 -- geometria (uguale al MotoServer), in stud
 local PASSO = 5.1536 -- distanza tra le ruote
@@ -63,6 +66,9 @@ local function statoDi(moto)
 		forc = 0.12, forcVel = 0, -- forcella: affondamento (stud)
 		amm = 0.05, ammVel = 0, -- forcellone: affondamento (stud)
 		velPrima = Vector3.zero,
+		longit = 0, -- accelerazione in avanti, filtrata
+		corpo = 0, corpoVel = 0, -- oscillazione avanti/indietro del pilota
+		salto = 0, saltoVel = 0, -- molleggio su/giu' del pilota
 	}
 	stati[moto] = st
 	print(string.format("[Moto] Client v%d: parti mobili collegate su %s (giunti: 5 su 5)", VERSIONE, moto.Name))
@@ -107,6 +113,10 @@ local function aggiornaGrafica(moto, st, dt, mia)
 	-- sospensioni: frenando affonda davanti, accelerando si siede dietro, i colpi verticali le comprimono
 	local longit = accel:Dot(cf.LookVector) -- + accelera, - frena
 	local vert = accel:Dot(cf.UpVector)
+	st.longit += (math.clamp(longit, -80, 80) - st.longit) * math.min(1, dt * 8)
+	-- il corpo del pilota ha inerzia: quando acceleri resta indietro, quando freni va avanti
+	st.corpo, st.corpoVel = molla(st.corpo, st.corpoVel, math.clamp(st.longit / 60, -1, 1), dt, 60, 9)
+	st.salto, st.saltoVel = molla(st.salto, st.saltoVel, math.clamp(-vert / 400, -0.12, 0.12), dt, 90, 8)
 	local obForc = math.clamp(0.12 - longit * 0.006 + vert * 0.002, 0, 0.75)
 	local obAmm = math.clamp(0.05 + longit * 0.003 + vert * 0.002, 0, 0.45)
 	if mia and not mia.aTerra then
@@ -125,6 +135,159 @@ local function aggiornaGrafica(moto, st, dt, mia)
 	-- forcellone lungo 2,08 stud: alzare la ruota di "amm" = ruotarlo di amm/2,08
 	g.Forcellone.Transform = CFrame.Angles(-st.amm / 2.08, 0, 0)
 end
+
+-- ---------------------------------------------------------------- posa dei piloti
+
+local piloti = {} -- [personaggio] = { giunti, transform, ... }
+local animatiFermati = {} -- personaggi a cui ho spento le animazioni (solo il mio)
+
+local function giuntiPilota(char)
+	local p = piloti[char]
+	if p then
+		local valido = p.g.Root and p.g.Root.Parent and p.g.Root.Part1 and p.g.Root.Part1.Parent == char
+		if valido then
+			return p
+		end
+	end
+	local g, ok, trovati, mancanti = Posa.trovaGiunti(char)
+	if not ok then
+		if not (p and p.avvisato) then
+			warn(string.format("[Moto] Posa del pilota NON possibile per %s: servono le articolazioni R15. Trovate %d su 15, mancano: %s",
+				char.Name, trovati, table.concat(mancanti, ", ")))
+		end
+		piloti[char] = { g = g, rotto = true, avvisato = true }
+		return piloti[char]
+	end
+	p = { g = g, transform = {}, inizio = os.clock(), controllato = false }
+	piloti[char] = p
+	print(string.format("[Moto] Posa del pilota attiva per %s (articolazioni trovate: %d su 15%s)",
+		char.Name, trovati, #mancanti > 0 and (", mancano: " .. table.concat(mancanti, ", ")) or ""))
+	return p
+end
+
+local function fermaAnimazioni(char)
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	local animate = char:FindFirstChild("Animate")
+	if animate and animate:IsA("LocalScript") then
+		animate.Enabled = false
+	end
+	local animator = hum and hum:FindFirstChildOfClass("Animator")
+	if animator then
+		for _, traccia in ipairs(animator:GetPlayingAnimationTracks()) do
+			traccia:Stop(0)
+		end
+	end
+	animatiFermati[char] = true
+end
+
+local function liberaPilota(char)
+	local p = piloti[char]
+	if p and p.g then
+		for chiave in pairs(Posa.PARTI) do
+			local j = p.g[chiave]
+			if j and j.Parent then
+				j.Transform = CFrame.new()
+			end
+		end
+	end
+	piloti[char] = nil
+	if animatiFermati[char] then
+		animatiFermati[char] = nil
+		local animate = char:FindFirstChild("Animate")
+		if animate and animate:IsA("LocalScript") then
+			animate.Enabled = true
+		end
+	end
+end
+
+local function controllaPosa(char, p, info)
+	-- dopo 1,5 secondi controllo DOVE sono davvero mani e piedi (cosi' sappiamo se la posa si vede)
+	p.controllato = true
+	local mano = char:FindFirstChild("RightHand")
+	local presa = mano and mano:FindFirstChild("RightGripAttachment")
+	if not (mano and info.manD) then
+		return
+	end
+	local puntoMano = presa and presa.WorldPosition or mano.Position
+	local dMano = (puntoMano - info.manD).Magnitude
+	local piede = char:FindFirstChild("RightFoot")
+	local dPiede = piede and (piede.Position - info.caviglia).Magnitude or -1
+	print(string.format("[Moto] Controllo posa %s: mano destra a %.2f stud dalla manopola, piede destro a %.2f dalla pedana (vicino a 0 = giusto)",
+		char.Name, dMano, dPiede))
+	if dMano > 0.6 then
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		local animator = hum and hum:FindFirstChildOfClass("Animator")
+		local nomi = {}
+		if animator then
+			for _, t in ipairs(animator:GetPlayingAnimationTracks()) do
+				table.insert(nomi, t.Name)
+			end
+		end
+		warn("[Moto] La posa NON si vede: qualcosa la sovrascrive. Animazioni in corso: "
+			.. (#nomi > 0 and table.concat(nomi, ", ") or "nessuna"))
+	end
+end
+
+local function posaPilota(moto, st, dt)
+	local sella = moto:FindFirstChild("Sella")
+	local hum = sella and sella.Occupant
+	local char = hum and hum.Parent
+	if not char then
+		return nil
+	end
+	local p = giuntiPilota(char)
+	if p.rotto then
+		return char
+	end
+	if char == giocatore.Character and not animatiFermati[char] then
+		fermaAnimazioni(char)
+	end
+	local perno = moto:FindFirstChild("Perno_Corpo")
+	if not perno then
+		return char
+	end
+	local cfMoto = perno.CFrame
+	local c0 = st.giunti.Sterzo.C0
+	local cfSterzo = cfMoto * c0 * CFrame.Angles(0, st.sterzo, 0) * c0:Inverse()
+	-- piccoli movimenti di equilibrio + piega del corpo dentro la curva
+	local t = os.clock()
+	local piegaMoto = math.asin(math.clamp(cfMoto.RightVector.Y, -1, 1))
+	local dyn = {
+		busto = -st.corpo * math.rad(14) + math.rad(1.2) * math.sin(t * 1.7),
+		scivola = st.corpo * 0.18,
+		rollio = piegaMoto * 0.25 + math.rad(0.8) * math.sin(t * 1.3),
+		molleggio = st.salto - (st.amm - 0.05) * 0.4,
+	}
+	local ok, trasf, info = pcall(Posa.calcola, p.g, cfMoto, cfSterzo, dyn)
+	if not ok then
+		if not p.erroreStampato then
+			p.erroreStampato = true
+			warn("[Moto] Errore nel calcolo della posa: " .. tostring(trasf))
+		end
+		return char
+	end
+	p.transform = trasf
+	for j, tr in pairs(trasf) do
+		j.Transform = tr
+	end
+	if not p.controllato and os.clock() - p.inizio > 1.5 then
+		controllaPosa(char, p, info)
+	end
+	return char
+end
+
+-- le animazioni di Roblox scrivono i giunti DOPO il RenderStepped: riscrivo la posa anche dopo di loro
+RunService.Stepped:Connect(function()
+	for char, p in pairs(piloti) do
+		if p.transform then
+			for j, tr in pairs(p.transform) do
+				if j.Parent then
+					j.Transform = tr
+				end
+			end
+		end
+	end
+end)
 
 -- ---------------------------------------------------------------- guida (solo la mia moto)
 
@@ -309,12 +472,23 @@ RunService.Heartbeat:Connect(function(dt)
 end)
 
 RunService.RenderStepped:Connect(function(dt)
+	local inSella = {}
 	for _, moto in ipairs(cartella:GetChildren()) do
 		if moto:IsA("Model") then
 			local st = statoDi(moto)
 			if st then
 				aggiornaGrafica(moto, st, dt, guida and guida.moto == moto and guida or nil)
+				local char = posaPilota(moto, st, dt)
+				if char then
+					inSella[char] = true
+				end
 			end
+		end
+	end
+	-- chi non e' piu' in sella torna normale
+	for char in pairs(piloti) do
+		if not inSella[char] then
+			liberaPilota(char)
 		end
 	end
 end)

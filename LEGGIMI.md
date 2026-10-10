@@ -4,7 +4,8 @@ Gioco Roblox con moto da cross. Si ricomincia da zero.
 
 - Passo 1 (fatto): la moto 3D (Yamaha YZ125 blu) montata sui perni.
 - Passo 2 (versione 2 degli script): ogni giocatore ha la sua moto, **E** per salire/scendere, guida base **W** gas, **S** freno, **A/D** sterzo, con piega in curva, sospensioni e campo visivo che si allarga con la velocità.
-- Prossimi: impennata con SHIFT, posa del pilota, caduta con ragdoll.
+- Passo 3 (versione 3): corpo slanciato (altezza x1,3, larghezza x0,8) e posa vera del pilota: mani sulle manopole, piedi sulle pedane, ginocchia piegate, busto in avanti; il corpo va indietro accelerando, avanti frenando, dentro le curve e molleggia.
+- Prossimi: impennata con SHIFT, caduta con ragdoll.
 
 ## File
 
@@ -13,6 +14,8 @@ Gioco Roblox con moto da cross. Si ricomincia da zero.
 | `MotoYZ125.glb` | modello 3D della moto | File → Import 3D, poi in **ServerStorage**, rinominato **MotoModello** |
 | `roblox/MotoServer.lua` | Script | **ServerScriptService** → Script chiamato `MotoServer` |
 | `roblox/MotoClient.lua` | LocalScript | **StarterPlayer → StarterPlayerScripts** → LocalScript chiamato `MotoClient` |
+| `roblox/PosaPilota.lua` | ModuleScript | **ReplicatedStorage** → ModuleScript chiamato `PosaPilota` |
+| `test/` | prova della posa fuori da Roblox (`./test/esegui.sh`, serve `luau`) | – |
 | `strumenti/genera_moto.py` | programma che crea `MotoYZ125.glb` (non va in Roblox) | – |
 | `anteprime/` | immagini di controllo del modello | – |
 
