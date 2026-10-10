@@ -18,13 +18,14 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
-local VERSIONE = 5
+local VERSIONE = 6
 local giocatore = Players.LocalPlayer
 local cartella = Workspace:WaitForChild("Moto")
 local eventoScendi = ReplicatedStorage:WaitForChild("MotoScendi")
 local Posa = require(ReplicatedStorage:WaitForChild("PosaPilota"))
 
--- geometria (uguale al MotoServer), in stud
+-- geometria (uguale al MotoServer), in stud, per la moto a scala 1.
+-- Ogni moto ha l'attributo "Scala" (messo dal server): le misure vere sono queste x Scala.
 local PASSO = 5.1536 -- distanza tra le ruote
 local R_DIETRO = 1.19 -- raggio gomma dietro
 local R_DAVANTI = 1.23 -- raggio gomma davanti
@@ -64,6 +65,7 @@ local function statoDi(moto)
 	st = {
 		giunti = g,
 		telaio = telaio,
+		scala = moto:GetAttribute("Scala") or 1,
 		giroDietro = 0,
 		giroDavanti = 0,
 		sterzo = 0,
@@ -100,8 +102,9 @@ local function aggiornaGrafica(moto, st, dt, mia)
 	st.velPrima = vel
 
 	-- ruote: giro = distanza / raggio (angolo negativo = rotola in avanti)
-	st.giroDietro -= velAvanti / R_DIETRO * dt
-	st.giroDavanti -= velAvanti / R_DAVANTI * dt
+	local k = st.scala
+	st.giroDietro -= velAvanti / (R_DIETRO * k) * dt
+	st.giroDavanti -= velAvanti / (R_DAVANTI * k) * dt
 
 	-- sterzo: per la mia moto uso il comando, per le altre lo stimo dalla rotazione
 	local sterzo
@@ -109,7 +112,7 @@ local function aggiornaGrafica(moto, st, dt, mia)
 		sterzo = mia.angoloSterzo
 	else
 		local yaw = tel.AssemblyAngularVelocity:Dot(cf.UpVector)
-		sterzo = math.atan(yaw * PASSO / math.max(math.abs(velAvanti), 2)) * math.sign(velAvanti + 0.01)
+		sterzo = math.atan(yaw * PASSO * k / math.max(math.abs(velAvanti), 2)) * math.sign(velAvanti + 0.01)
 		sterzo = math.clamp(sterzo, -STERZO_MAX, STERZO_MAX)
 	end
 	st.sterzo += (sterzo - st.sterzo) * math.min(1, dt * 12)
@@ -136,8 +139,8 @@ local function aggiornaGrafica(moto, st, dt, mia)
 	g.RuotaDavanti.Transform = CFrame.Angles(st.giroDavanti, 0, 0)
 	g.Sterzo.Transform = CFrame.Angles(0, st.sterzo, 0)
 	g.Forcella.Transform = CFrame.new(0, st.forc, 0)
-	-- forcellone lungo 2,08 stud: alzare la ruota di "amm" = ruotarlo di amm/2,08
-	g.Forcellone.Transform = CFrame.Angles(-st.amm / 2.08, 0, 0)
+	-- forcellone lungo 2,08 stud (x scala): alzare la ruota di "amm" = ruotarlo di amm/lunghezza
+	g.Forcellone.Transform = CFrame.Angles(-st.amm / (2.08 * k), 0, 0)
 end
 
 -- ---------------------------------------------------------------- posa dei piloti
@@ -269,7 +272,7 @@ local function posaPilota(moto, st, dt)
 		rollio = piegaMoto * 0.25 + math.rad(0.8) * math.sin(t * 1.3),
 		molleggio = st.salto - (st.amm - 0.05) * 0.4,
 	}
-	local ok, trasf, info = pcall(Posa.calcola, p.g, cfMoto, cfSterzo, dyn)
+	local ok, trasf, info = pcall(Posa.calcola, p.g, cfMoto, cfSterzo, dyn, st.scala)
 	if not ok then
 		if not p.erroreStampato then
 			p.erroreStampato = true
@@ -341,6 +344,7 @@ local function iniziaGuida(moto)
 		angoloSterzo = 0,
 		aTerra = true,
 		raggi = parametriRaggi(moto),
+		scala = moto:GetAttribute("Scala") or 1,
 		tempoRaggi = 0,
 	}
 	print("[Moto] Sei in sella a " .. moto.Name .. ". W gas, S freno, A/D sterzo, E scendi.")
@@ -394,21 +398,23 @@ local function guidaPasso(dt)
 	g.vel = v
 
 	-- terreno: un raggio sotto ogni ruota
-	local asse = tel.CFrame * TELAIO_ASSE
+	local k = g.scala
+	local passo, rDietro = PASSO * k, R_DIETRO * k
+	local asse = tel.CFrame * CFrame.new(TELAIO_ASSE.Position * k)
 	local pDietro = asse.Position
-	local pDavanti = pDietro + avantiPiatto * PASSO
-	local giu = Vector3.new(0, -(R_DIETRO + 3), 0)
+	local pDavanti = pDietro + avantiPiatto * passo
+	local giu = Vector3.new(0, -(rDietro + 3), 0)
 	local su = Vector3.new(0, 1.5, 0)
 	local cDietro = Workspace:Raycast(pDietro + su, giu - su, g.raggi)
 	local cDavanti = Workspace:Raycast(pDavanti + su, giu - su, g.raggi)
-	local aTerra = cDietro ~= nil and (pDietro.Y - cDietro.Position.Y) < R_DIETRO + 0.6
+	local aTerra = cDietro ~= nil and (pDietro.Y - cDietro.Position.Y) < rDietro + 0.6
 
 	-- sterzo e piega (solo a terra)
 	local sterzoMax = STERZO_MAX / (1 + math.abs(v) / 20)
 	g.angoloSterzo = -g.sterzoIn * sterzoMax
 	local yawRate = 0
 	if aTerra then
-		yawRate = v * math.tan(g.angoloSterzo) / PASSO
+		yawRate = v * math.tan(g.angoloSterzo) / passo
 	end
 	g.yaw += yawRate * dt
 	local gravita = Workspace.Gravity
@@ -417,14 +423,14 @@ local function guidaPasso(dt)
 
 	-- beccheggio dal terreno
 	if aTerra and cDavanti then
-		local ob = math.atan2(cDavanti.Position.Y - cDietro.Position.Y, PASSO)
+		local ob = math.atan2(cDavanti.Position.Y - cDietro.Position.Y, passo)
 		g.beccheggio += (ob - g.beccheggio) * math.min(1, dt * 12)
 	end
 
 	-- velocita' da dare al telaio
 	local vy = velVera.Y
 	if aTerra then
-		local yOb = cDietro.Position.Y + R_DIETRO * math.cos(g.piega)
+		local yOb = cDietro.Position.Y + rDietro * math.cos(g.piega)
 		vy = math.clamp((yOb - pDietro.Y) * 18, -40, 60) + v * math.sin(g.beccheggio)
 	end
 	local orizz = avantiPiatto * v * math.cos(g.beccheggio)

@@ -14,10 +14,13 @@ local function giunto(p1, c0, c1)
 	return { Part1 = p1, C0 = CFrame.new(c0[1], c0[2], c0[3]), C1 = CFrame.new(c1[1], c1[2], c1[3]), Transform = CFrame.new() }
 end
 
-local function rig(h, w, d, conCaviglie)
+local function rig(h, w, d, conCaviglie, kg, km)
+	kg, km = kg or 1, km or 1
 	local function s(x, y, z) return { x * w, y * h, z * d } end
-	local mano = parte("RightHand", 0.6 * w, 0.4 * h, 0.6 * d, { RightGripAttachment = { Position = Vector3.new(0, -0.15 * h, 0) } })
-	local manoS = parte("LeftHand", 0.6 * w, 0.4 * h, 0.6 * d, { LeftGripAttachment = { Position = Vector3.new(0, -0.15 * h, 0) } })
+	local function sg(x, y, z) return { x * w, y * h * kg, z * d } end
+	local function sm(x, y, z) return { x * w * km, y * h * km, z * d * km } end
+	local mano = parte("RightHand", 0.6 * w * km, 0.4 * h * km, 0.6 * d * km, { RightGripAttachment = { Position = Vector3.new(0, -0.15 * h * km, 0) } })
+	local manoS = parte("LeftHand", 0.6 * w * km, 0.4 * h * km, 0.6 * d * km, { LeftGripAttachment = { Position = Vector3.new(0, -0.15 * h * km, 0) } })
 	local g = {
 		hrp = { CFrame = CFrame.new() },
 		Root = giunto(parte("LowerTorso", 2 * w, 0.4 * h, 1 * d), s(0, -0.2, 0), s(0, -0.2, 0)),
@@ -25,18 +28,18 @@ local function rig(h, w, d, conCaviglie)
 		Neck = giunto(parte("Head", 1.2, 1.2, 1.2), s(0, 0.8, 0), s(0, -0.5, 0)),
 		RS = giunto(parte("RightUpperArm", 1 * w, 1.17 * h, 1 * d), s(1.0, 0.56, 0), s(-0.5, 0.39, 0)),
 		RE = giunto(parte("RightLowerArm", 1 * w, 1.05 * h, 1 * d), s(0, -0.33, 0), s(0, 0.2, 0)),
-		RW = giunto(mano, s(0, -0.5, 0), s(0, 0.12, 0)),
+		RW = giunto(mano, s(0, -0.5, 0), sm(0, 0.12, 0)),
 		LS = giunto(parte("LeftUpperArm", 1 * w, 1.17 * h, 1 * d), s(-1.0, 0.56, 0), s(0.5, 0.39, 0)),
 		LE = giunto(parte("LeftLowerArm", 1 * w, 1.05 * h, 1 * d), s(0, -0.33, 0), s(0, 0.2, 0)),
-		LW = giunto(manoS, s(0, -0.5, 0), s(0, 0.12, 0)),
-		RH = giunto(parte("RightUpperLeg", 1 * w, 1.22 * h, 1 * d), s(0.5, -0.2, 0), s(0, 0.42, 0)),
-		RK = giunto(parte("RightLowerLeg", 1 * w, 1.19 * h, 1 * d), s(0, -0.33, 0), s(0, 0.29, 0)),
-		LH = giunto(parte("LeftUpperLeg", 1 * w, 1.22 * h, 1 * d), s(-0.5, -0.2, 0), s(0, 0.42, 0)),
-		LK = giunto(parte("LeftLowerLeg", 1 * w, 1.19 * h, 1 * d), s(0, -0.33, 0), s(0, 0.29, 0)),
+		LW = giunto(manoS, s(0, -0.5, 0), sm(0, 0.12, 0)),
+		RH = giunto(parte("RightUpperLeg", 1 * w, 1.22 * h * kg, 1 * d), s(0.5, -0.2, 0), sg(0, 0.42, 0)),
+		RK = giunto(parte("RightLowerLeg", 1 * w, 1.19 * h * kg, 1 * d), sg(0, -0.33, 0), sg(0, 0.29, 0)),
+		LH = giunto(parte("LeftUpperLeg", 1 * w, 1.22 * h * kg, 1 * d), s(-0.5, -0.2, 0), sg(0, 0.42, 0)),
+		LK = giunto(parte("LeftLowerLeg", 1 * w, 1.19 * h * kg, 1 * d), sg(0, -0.33, 0), sg(0, 0.29, 0)),
 	}
 	if conCaviglie then
-		g.RA = giunto(parte("RightFoot", 1 * w, 0.3 * h, 1.2 * d), s(0, -0.55, 0), s(0, 0.1, 0))
-		g.LA = giunto(parte("LeftFoot", 1 * w, 0.3 * h, 1.2 * d), s(0, -0.55, 0), s(0, 0.1, 0))
+		g.RA = giunto(parte("RightFoot", 1 * w, 0.3 * h, 1.2 * d), sg(0, -0.55, 0), s(0, 0.1, 0))
+		g.LA = giunto(parte("LeftFoot", 1 * w, 0.3 * h, 1.2 * d), sg(0, -0.55, 0), s(0, 0.1, 0))
 	end
 	return g
 end
@@ -65,31 +68,32 @@ local function controlla(cond, msg)
 end
 local function f(v) return string.format("(%.2f, %.2f, %.2f)", v.X, v.Y, v.Z) end
 
+-- nome, altezza, larghezza, profondita', caviglie, gambe, mani, scala moto, gambe lunghe abbastanza?
 local casi = {
-	{ "standard 1.0", 1, 1, 1, true },
-	{ "slanciato 1.2/0.78/0.8", 1.2, 0.78, 0.8, true },
-	{ "slanciato 1.3/0.8/0.8 (quello del gioco)", 1.3, 0.8, 0.8, true },
-	{ "slanciato 1.3 senza caviglie", 1.3, 0.8, 0.8, false },
-	{ "basso 0.9", 0.9, 1, 1, true },
+	{ "standard 1.0, moto 1.0", 1, 1, 1, true, 1, 1, 1, false },
+	{ "quello del gioco: 1.15/0.8/0.8, gambe 1.22, mani 0.72, moto 1.08", 1.15, 0.8, 0.8, true, 1.22, 0.72, 1.08, true },
+	{ "come il gioco ma senza caviglie", 1.15, 0.8, 0.8, false, 1.22, 0.72, 1.08, true },
+	{ "basso 0.9, moto 1.08", 0.9, 1, 1, true, 1, 1, 1.08, false },
 }
 -- moto in un punto qualsiasi del mondo, girata e piegata, con lo sterzo girato
 local motoCF = CFrame.new(10, 3, -4) * CFrame.Angles(0, math.rad(35), 0) * CFrame.Angles(math.rad(4), 0, math.rad(-15))
 for _, caso in ipairs(casi) do
 	local nome, h, w, d, cav = caso[1], caso[2], caso[3], caso[4], caso[5]
+	local kg, km, K, lunghe = caso[6], caso[7], caso[8], caso[9]
 	print("== " .. nome)
-	local g = rig(h, w, d, cav)
+	local g = rig(h, w, d, cav, kg, km)
 	-- hrp dove lo mette la sella (circa sopra la sella), qualsiasi posizione va bene
 	g.hrp.CFrame = motoCF * CFrame.new(0, 3.5, -1.5)
 	local sterzoLocale = CFrame.new(0, 2.4006, -3.8463) * CFrame.Angles(0, 0, 0)
 	for _, angolo in ipairs({ 0, 20, -20 }) do
-		local asse = CFrame.fromMatrix(Vector3.new(0, 2.4006, -3.8463), Vector3.new(1, 0, 0), Vector3.new(0, 0.9136, 0.4066))
+		local asse = CFrame.fromMatrix(Vector3.new(0, 2.4006, -3.8463) * K, Vector3.new(1, 0, 0), Vector3.new(0, 0.9136, 0.4066))
 		local sterzo = motoCF * asse * CFrame.Angles(0, math.rad(angolo), 0) * asse:Inverse()
-		local T, info = Posa.calcola(g, motoCF, sterzo, { busto = 0, scivola = 0, rollio = math.rad(-8) })
+		local T, info = Posa.calcola(g, motoCF, sterzo, { busto = 0, scivola = 0, rollio = math.rad(-8) }, K)
 		local p = fk(g, T)
 		local loc = motoCF:Inverse()
 		-- mani: punto di presa sulla manopola
-		local presaD = p.RH * Vector3.new(0, -0.15 * h, 0)
-		local presaS = p.LH * Vector3.new(0, -0.15 * h, 0)
+		local presaD = p.RH * Vector3.new(0, -0.15 * h * km, 0)
+		local presaS = p.LH * Vector3.new(0, -0.15 * h * km, 0)
 		local eD = (presaD - info.manD).Magnitude
 		local eS = (presaS - info.manS).Magnitude
 		-- gomiti e ginocchia (nel sistema della moto)
@@ -99,13 +103,16 @@ for _, caso in ipairs(casi) do
 		print(string.format("  sterzo %3d: mani a %.3f / %.3f stud dalle manopole; gomito dx %s; ginocchio dx %s; anca %s",
 			angolo, eD, eS, f(gomitoD), f(ginD), f(ancaD)))
 		controlla(eD < 0.12 and eS < 0.12, "mani lontane dalle manopole")
-		-- la mano deve chiudersi attorno alla manopola: dita in avanti e in giu', non dritte come il braccio
+		-- polso dritto: la mano continua l'avambraccio (come nel video), nocche in su
 		local dita = -(p.RH.m[2])
-		local giuM = -(motoCF.m[2])
-		local avM = motoCF.m[3] * -1
-		controlla(dita:Dot(giuM) > 0.6 and dita:Dot(avM) > 0.2, "mano destra non chiusa sulla manopola")
+		local avambraccio = -(p.RLA.m[2])
+		local piegaPolso = math.deg(math.acos(math.clamp(dita:Dot(avambraccio), -1, 1)))
+		local nocche = p.RH.m[1]:Dot(motoCF.m[2])
+		if angolo == 0 then print(string.format("  polso piegato di %.0f gradi, dorso della mano verso l'alto %.2f", piegaPolso, nocche)) end
+		controlla(piegaPolso < (lunghe and 25 or 35), string.format("polso piegato troppo (%.0f gradi)", piegaPolso))
+		controlla(nocche > 0.4, "dorso della mano non verso l'alto")
 		controlla(gomitoD.X > 0.55 and gomitoD.X < 1.75, "gomito destro troppo dentro o troppo fuori")
-		if h >= 1.25 then
+		if lunghe then
 			controlla(ginD.Z < ancaD.Z - 0.3, "ginocchio non in avanti rispetto all'anca")
 		end
 		controlla(ginD.X > 0.5, "ginocchio dentro la moto")
@@ -113,7 +120,7 @@ for _, caso in ipairs(casi) do
 			local cav3 = p.RF * g.RA.C1.Position
 			local eC = (cav3 - info.caviglia).Magnitude
 			local suola = loc * (p.RF * Vector3.new(0, -0.15 * h, 0))
-			if h >= 1.25 then -- con le gambe corte (scala 1) i piedi non arrivano: va bene, restano tesi verso la pedana
+			if lunghe then -- con le gambe corte (scala 1) i piedi non arrivano: va bene, restano tesi verso la pedana
 				controlla(eC < 0.1, string.format("caviglia lontana dalla pedana (%.2f)", eC))
 			end
 			if angolo == 0 then print(string.format("  caviglia a %.3f dal bersaglio, suola dx %s (pedana a y 0.31)", eC, f(suola))) end
@@ -122,7 +129,7 @@ for _, caso in ipairs(casi) do
 			if angolo == 0 then print("  fondo gamba dx " .. f(fine)) end
 		end
 		-- coscia sopra la sella: l'anca deve stare sopra la superficie
-		controlla(ancaD.Y > 2.0, "anca sotto la sella")
+		controlla(ancaD.Y > 2.0 * K, "anca sotto la sella")
 		if angolo == 0 then print(string.format("  seduto a z = %.2f, braccio lungo %.2f", info.zAnche, info.braccio)) end
 	end
 end
@@ -130,10 +137,10 @@ print(errori == 0 and "TUTTO OK" or ("ERRORI: " .. errori))
 
 -- JSON con le parti del pilota (moto ferma nell'origine) per disegnarlo sopra il modello 3D
 do
-	local g = rig(1.3, 0.8, 0.8, true)
+	local g = rig(1.15, 0.8, 0.8, true, 1.22, 0.72)
 	g.hrp.CFrame = CFrame.new(0, 3.5, -1.5)
-	local dyn = { busto = tonumber(DYN_BUSTO) or 0, scivola = tonumber(DYN_SCIVOLA) or 0, rollio = 0 }
-	local T = Posa.calcola(g, CFrame.new(), CFrame.new(), dyn)
+	local dyn = { busto = 0, scivola = 0, rollio = 0 }
+	local T = Posa.calcola(g, CFrame.new(), CFrame.new(), dyn, 1.08)
 	local p = fk(g, T)
 	local function voce(cfp, j, sx, sy, sz)
 		local m = cfp.m

@@ -11,7 +11,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 local Workspace = game:GetService("Workspace")
 
-local VERSIONE = 3
+local VERSIONE = 4
 
 local function log(...)
 	print("[Moto]", ...)
@@ -30,6 +30,15 @@ local GEOMETRIA = {
 	DistanzaAvanti = 5, -- distanza tra i cubetti RIF_Origine e RIF_Avanti
 	DistanzaSu = 3, -- distanza tra i cubetti RIF_Origine e RIF_Su
 }
+
+-- La moto viene ingrandita di questo fattore (1 = misure del file 3D, dove 1 stud = 0,28 m).
+-- Lo leggono anche MotoClient e PosaPilota dall'attributo "Scala" della moto.
+local SCALA_MOTO = 1.08
+local GEO = {}
+for k, v in pairs(GEOMETRIA) do
+	GEO[k] = (k == "DirSterzo") and v or v * SCALA_MOTO
+end
+local TELAIO_OFFSET = CFrame.new(0, 0.9 * SCALA_MOTO, -2.6 * SCALA_MOTO) -- dall'asse dietro al centro del Telaio
 
 local function materiale(nome, riserva)
 	local ok, m = pcall(function()
@@ -115,13 +124,13 @@ local function costruisciMoto(nome, cfDestinazione)
 		return nil
 	end
 	local distA = (rA.Position - rO.Position).Magnitude
-	local fattore = GEOMETRIA.DistanzaAvanti / distA
+	local fattore = GEO.DistanzaAvanti / distA
 	if math.abs(fattore - 1) > 0.001 then
 		m:ScaleTo(m:GetScale() * fattore)
 	end
 	local o, a, s = rO.Position, rA.Position, rS.Position
-	log(string.format("Scala corretta di x%.3f. Controllo: avanti = %.2f (deve essere 5), su = %.2f (deve essere 3)",
-		fattore, (a - o).Magnitude, (s - o).Magnitude))
+	log(string.format("Scala corretta di x%.3f. Controllo: avanti = %.2f (deve essere %.2f), su = %.2f (deve essere %.2f)",
+		fattore, (a - o).Magnitude, GEO.DistanzaAvanti, (s - o).Magnitude, GEO.DistanzaSu))
 
 	-- 2) orientamento: ricostruisco il sistema di riferimento del file 3D
 	local avanti = (a - o).Unit
@@ -134,7 +143,7 @@ local function costruisciMoto(nome, cfDestinazione)
 	local moto = Instance.new("Model")
 	moto.Name = nome
 
-	local G = GEOMETRIA
+	local G = GEO
 	local rotSterzo = CFrame.fromMatrix(Vector3.zero, Vector3.xAxis, G.DirSterzo)
 	local cfPerni = {
 		Corpo = CFrame.new(),
@@ -153,8 +162,8 @@ local function costruisciMoto(nome, cfDestinazione)
 	-- Sta 1,3 stud sopra il terreno, cosi' non striscia: l'altezza la tiene il client con i raggi.
 	local telaio = Instance.new("Part")
 	telaio.Name = "Telaio"
-	telaio.Size = Vector3.new(1.2, 1.6, 7)
-	telaio.CFrame = cfDestinazione * CFrame.new(0, 0.9, -2.6)
+	telaio.Size = Vector3.new(1.2, 1.6, 7) * SCALA_MOTO
+	telaio.CFrame = cfDestinazione * TELAIO_OFFSET
 	telaio.Transparency = 1
 	telaio.CanCollide = true
 	telaio.CanTouch = false
@@ -183,7 +192,7 @@ local function costruisciMoto(nome, cfDestinazione)
 	-- sedile invisibile + tasto E per salire
 	local sella = Instance.new("Seat")
 	sella.Name = "Sella"
-	sella.Size = Vector3.new(1, 0.3, 1.6)
+	sella.Size = Vector3.new(1, 0.3, 1.6) * SCALA_MOTO
 	sella.CFrame = cfDestinazione * CFrame.new(G.Sella)
 	sella.Transparency = 1
 	sella.CanCollide = false
@@ -310,7 +319,7 @@ local function cfAppoggiata(pos, dir, escludi)
 	if dir.Magnitude < 0.01 then
 		dir = Vector3.new(0, 0, -1)
 	end
-	local p = Vector3.new(pos.X, y - GEOMETRIA.Terra + 0.02, pos.Z)
+	local p = Vector3.new(pos.X, y - GEO.Terra + 0.02, pos.Z)
 	return CFrame.lookAt(p, p + dir.Unit)
 end
 
@@ -320,7 +329,7 @@ local function parcheggia(moto)
 	if not telaio then
 		return
 	end
-	local asse = telaio.CFrame * CFrame.new(0, -0.9, 2.6)
+	local asse = telaio.CFrame * TELAIO_OFFSET:Inverse()
 	local escludi = { cartella }
 	for _, p in ipairs(Players:GetPlayers()) do
 		if p.Character then
@@ -332,7 +341,7 @@ local function parcheggia(moto)
 	telaio.AssemblyLinearVelocity = Vector3.zero
 	telaio.AssemblyAngularVelocity = Vector3.zero
 	telaio.Anchored = true
-	moto:PivotTo(cf * CFrame.new(0, 0.9, -2.6))
+	moto:PivotTo(cf * TELAIO_OFFSET)
 end
 
 local function collegaSella(moto, proprietario)
@@ -394,10 +403,15 @@ end)
 -- corpo slanciato: piu' alto e piu' sottile, in proporzione con la moto (1 stud = 0,28 m)
 -- Cambio i valori di scala dell'Humanoid: Roblox ridimensiona il corpo senza rifare le articolazioni.
 local SCALA_CORPO = {
-	BodyHeightScale = 1.3,
+	BodyHeightScale = 1.15,
 	BodyWidthScale = 0.8,
 	BodyDepthScale = 0.8,
-	HeadScale = 0.9,
+	HeadScale = 0.85,
+}
+
+local PROPORZIONI = {
+	Gambe = 1.22, -- gambe piu' lunghe
+	Mani = 0.72, -- mani piu' piccole
 }
 
 local function slancia(giocatore, char)
@@ -426,10 +440,62 @@ local function slancia(giocatore, char)
 		end
 		nv.Value = valore
 	end
+	-- proporzioni da ragazzo vero (le gambe Roblox sono corte e le mani enormi):
+	-- gambe piu' lunghe, mani piu' piccole. Aspetto che Roblox abbia finito di scalare.
+	task.wait(0.5)
+	if char.Parent == nil then
+		return
+	end
+	hum.AutomaticScalingEnabled = false -- cosi' Roblox non rimette le misure di prima
+	local function allunga(nomeParte, k)
+		local p = char:FindFirstChild(nomeParte)
+		if not (p and p:IsA("BasePart")) then
+			return 0
+		end
+		local vecchiaY = p.Size.Y
+		p.Size = Vector3.new(p.Size.X, p.Size.Y * k, p.Size.Z)
+		for _, a in ipairs(p:GetChildren()) do
+			if a:IsA("Attachment") then
+				a.Position = Vector3.new(a.Position.X, a.Position.Y * k, a.Position.Z)
+			end
+		end
+		return vecchiaY * (k - 1)
+	end
+	local function rimpicciolisci(nomeParte, k)
+		local p = char:FindFirstChild(nomeParte)
+		if not (p and p:IsA("BasePart")) then
+			return
+		end
+		p.Size = p.Size * k
+		for _, a in ipairs(p:GetChildren()) do
+			if a:IsA("Attachment") then
+				a.Position = a.Position * k
+			end
+		end
+	end
+	local piu = allunga("RightUpperLeg", PROPORZIONI.Gambe) + allunga("RightLowerLeg", PROPORZIONI.Gambe)
+	allunga("LeftUpperLeg", PROPORZIONI.Gambe)
+	allunga("LeftLowerLeg", PROPORZIONI.Gambe)
+	for _, nome in ipairs({ "RightHand", "LeftHand" }) do
+		rimpicciolisci(nome, PROPORZIONI.Mani)
+	end
+	-- i giunti classici (Motor6D) vanno ricostruiti dagli attachment; quelli nuovi li seguono da soli
+	local haMotor6D = false
+	for _, d in ipairs(char:GetDescendants()) do
+		if d:IsA("Motor6D") and d.Part1 and d.Part1.Name == "RightUpperLeg" then
+			haMotor6D = true
+		end
+	end
+	if haMotor6D then
+		pcall(function()
+			hum:BuildRigFromAttachments()
+		end)
+	end
+	hum.HipHeight += piu
 	char:SetAttribute("Slanciato", true)
-	log(string.format("Corpo slanciato per %s: altezza x%.2f, larghezza x%.2f, profondita' x%.2f, testa x%.2f",
+	log(string.format("Corpo slanciato per %s: altezza x%.2f, larghezza x%.2f, profondita' x%.2f, testa x%.2f, gambe x%.2f, mani x%.2f (HipHeight %.2f)",
 		giocatore.Name, SCALA_CORPO.BodyHeightScale, SCALA_CORPO.BodyWidthScale,
-		SCALA_CORPO.BodyDepthScale, SCALA_CORPO.HeadScale))
+		SCALA_CORPO.BodyDepthScale, SCALA_CORPO.HeadScale, PROPORZIONI.Gambe, PROPORZIONI.Mani, hum.HipHeight))
 end
 
 -- una moto per ogni giocatore, 10 stud davanti a dove nasce (la prima volta)
@@ -454,6 +520,7 @@ local function motoDelGiocatore(giocatore)
 		return nil
 	end
 	moto:SetAttribute("Proprietario", giocatore.UserId)
+	moto:SetAttribute("Scala", SCALA_MOTO)
 	moto.Parent = cartella
 	collegaSella(moto, giocatore)
 	log("Versione " .. VERSIONE .. ": creata " .. moto.Name .. ". Avvicinati e premi E per salire.")
