@@ -18,7 +18,7 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
-local VERSIONE = 3
+local VERSIONE = 4
 local giocatore = Players.LocalPlayer
 local cartella = Workspace:WaitForChild("Moto")
 local eventoScendi = ReplicatedStorage:WaitForChild("MotoScendi")
@@ -148,24 +148,29 @@ local animatiFermati = {} -- personaggi a cui ho spento le animazioni (solo il m
 local function giuntiPilota(char)
 	local p = piloti[char]
 	if p then
-		local valido = p.g.Root and p.g.Root.Parent and p.g.Root.Part1 and p.g.Root.Part1.Parent == char
+		local valido = p.g.Root and p.g.Root.inst.Parent and p.g.Root.Part1.Parent == char
 		if valido then
+			Posa.aggiorna(p.g)
+			return p
+		end
+		if p.rotto and p.riprova and os.clock() < p.riprova then
 			return p
 		end
 	end
 	local g, ok, trovati, mancanti = Posa.trovaGiunti(char)
 	if not ok then
 		if not (p and p.avvisato) then
-			warn(string.format("[Moto] Posa del pilota NON possibile per %s: servono le articolazioni R15. Trovate %d su 15, mancano: %s",
-				char.Name, trovati, table.concat(mancanti, ", ")))
+			warn(string.format("[Moto] Posa del pilota NON possibile per %s: trovate %d articolazioni su 15, mancano: %s. Giunti nel personaggio: %s",
+				char.Name, trovati, table.concat(mancanti, ", "), Posa.ultimiTipi))
 		end
-		piloti[char] = { g = g, rotto = true, avvisato = true }
+		-- riprovo tra 2 secondi (il personaggio potrebbe essere ancora in caricamento)
+		piloti[char] = { g = g, rotto = true, avvisato = true, riprova = os.clock() + 2 }
 		return piloti[char]
 	end
 	p = { g = g, transform = {}, inizio = os.clock(), controllato = false }
 	piloti[char] = p
-	print(string.format("[Moto] Posa del pilota attiva per %s (articolazioni trovate: %d su 15%s)",
-		char.Name, trovati, #mancanti > 0 and (", mancano: " .. table.concat(mancanti, ", ")) or ""))
+	print(string.format("[Moto] Posa del pilota attiva per %s (articolazioni trovate: %d su 15%s). Giunti nel personaggio: %s",
+		char.Name, trovati, #mancanti > 0 and (", mancano: " .. table.concat(mancanti, ", ")) or "", Posa.ultimiTipi))
 	return p
 end
 
@@ -189,8 +194,8 @@ local function liberaPilota(char)
 	if p and p.g then
 		for chiave in pairs(Posa.PARTI) do
 			local j = p.g[chiave]
-			if j and j.Parent then
-				j.Transform = CFrame.new()
+			if j and j.inst.Parent then
+				j.inst.Transform = CFrame.new()
 			end
 		end
 	end
@@ -272,7 +277,7 @@ local function posaPilota(moto, st, dt)
 	end
 	p.transform = trasf
 	for j, tr in pairs(trasf) do
-		j.Transform = tr
+		j.inst.Transform = tr
 	end
 	if not p.controllato and os.clock() - p.inizio > 1.5 then
 		controllaPosa(char, p, info)
@@ -285,8 +290,8 @@ RunService.Stepped:Connect(function()
 	for char, p in pairs(piloti) do
 		if p.transform then
 			for j, tr in pairs(p.transform) do
-				if j.Parent then
-					j.Transform = tr
+				if j.inst.Parent then
+					j.inst.Transform = tr
 				end
 			end
 		end

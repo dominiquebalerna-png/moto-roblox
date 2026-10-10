@@ -27,14 +27,62 @@ local PARTI = {
 local OBBLIGATORI = { "Root", "Waist", "RS", "RE", "LS", "LE", "RH", "RK", "LH", "LK" }
 Posa.PARTI = PARTI
 
--- Cerca i Motor6D per la PARTE che muovono (non per nome del giunto: alcuni avatar li chiamano diversamente)
-function Posa.trovaGiunti(personaggio)
-	local perParte = {}
-	for _, d in ipairs(personaggio:GetDescendants()) do
-		if d:IsA("Motor6D") and d.Part1 then
-			perParte[d.Part1.Name] = d
+-- Un giunto puo' essere di due tipi:
+--  * Motor6D (avatar classici): Part0, Part1, C0, C1, Transform
+--  * AnimationConstraint (avatar nuovi, "Avatar Joint Upgrade"): Attachment0, Attachment1, Transform
+-- Per la posa li tratto allo stesso modo con una piccola tabella: { inst, Part1, C0, C1 }.
+local function avvolgi(d)
+	if d:IsA("Motor6D") then
+		if d.Part0 and d.Part1 then
+			return { inst = d, tipo = "Motor6D", Part1 = d.Part1, C0 = d.C0, C1 = d.C1 }
+		end
+	elseif d:IsA("AnimationConstraint") then
+		local a0, a1 = d.Attachment0, d.Attachment1
+		if a0 and a1 and a0.Parent and a1.Parent and a1.Parent:IsA("BasePart") then
+			return { inst = d, tipo = "AnimationConstraint", Part1 = a1.Parent, C0 = a0.CFrame, C1 = a1.CFrame }
 		end
 	end
+	return nil
+end
+
+-- rilegge C0/C1 (cambiano quando il corpo viene ridimensionato)
+function Posa.aggiorna(g)
+	for chiave in pairs(PARTI) do
+		local j = g[chiave]
+		if j then
+			local d = j.inst
+			if j.tipo == "Motor6D" then
+				j.C0, j.C1 = d.C0, d.C1
+			elseif d.Attachment0 and d.Attachment1 then
+				j.C0, j.C1 = d.Attachment0.CFrame, d.Attachment1.CFrame
+			end
+		end
+	end
+end
+
+-- Cerca i giunti per la PARTE che muovono (non per nome del giunto: alcuni avatar li chiamano diversamente)
+function Posa.trovaGiunti(personaggio)
+	local perParte = {}
+	local tipi = {}
+	for _, d in ipairs(personaggio:GetDescendants()) do
+		if d:IsA("Motor6D") or d:IsA("AnimationConstraint") or d:IsA("BallSocketConstraint") then
+			tipi[d.ClassName] = (tipi[d.ClassName] or 0) + 1
+		end
+		local j = avvolgi(d)
+		if j then
+			-- se ci sono tutti e due i tipi per la stessa parte, preferisco il Motor6D se e' attivo
+			local prima = perParte[j.Part1.Name]
+			if not prima or (j.tipo == "Motor6D" and d.Enabled) then
+				perParte[j.Part1.Name] = j
+			end
+		end
+	end
+	local elencoTipi = {}
+	for nome, n in pairs(tipi) do
+		table.insert(elencoTipi, nome .. " " .. n)
+	end
+	table.sort(elencoTipi)
+	Posa.ultimiTipi = #elencoTipi > 0 and table.concat(elencoTipi, ", ") or "nessun giunto"
 	local g = { hrp = personaggio:FindFirstChild("HumanoidRootPart") }
 	local trovati, mancanti = 0, {}
 	for chiave, parte in pairs(PARTI) do
