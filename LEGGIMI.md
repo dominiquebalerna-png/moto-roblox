@@ -19,6 +19,10 @@ Gioco Roblox con moto da cross. Si ricomincia da zero.
 | `strumenti/genera_moto.py` | programma che crea `MotoYZ125.glb` (non va in Roblox) | – |
 | `anteprime/` | immagini di controllo del modello | – |
 
+## Mettere gli script in Studio senza copia-incolla
+
+Nella cartella `studio/` ci sono `MotoServer.rbxmx`, `MotoClient.rbxmx`, `PosaPilota.rbxmx`: clic destro sulla cartella giusta in Studio → **Insert from File...** e scegli il file. (Se incolli a mano, controlla che l'ultima riga sia stata copiata.)
+
 ## Il modello 3D
 
 - Misure prese dalla foto: passo 1443 mm, 1 stud = 0,28 m, ruota dietro 19", davanti 21".
