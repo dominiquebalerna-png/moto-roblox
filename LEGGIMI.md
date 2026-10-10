@@ -1,6 +1,10 @@
 # Moto Cross Roblox
 
-Gioco Roblox con moto da cross. Si ricomincia da zero: **passo 1 = la moto (Yamaha YZ125 blu)**.
+Gioco Roblox con moto da cross. Si ricomincia da zero.
+
+- Passo 1 (fatto): la moto 3D (Yamaha YZ125 blu) montata sui perni.
+- Passo 2 (versione 2 degli script): ogni giocatore ha la sua moto, **E** per salire/scendere, guida base **W** gas, **S** freno, **A/D** sterzo, con piega in curva, sospensioni e campo visivo che si allarga con la velocità.
+- Prossimi: impennata con SHIFT, posa del pilota, caduta con ragdoll.
 
 ## File
 

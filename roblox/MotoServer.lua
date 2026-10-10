@@ -1,14 +1,17 @@
 -- MotoServer (Script)
 -- Dove va: ServerScriptService
--- Passo 1 del gioco nuovo: carica la moto 3D (Yamaha YZ125) da ServerStorage > MotoModello,
--- le da' colori e materiali, la monta sui perni (ruote, sterzo, forcella, forcellone)
--- e la mette in vetrina davanti allo SpawnLocation.
+-- Carica la moto 3D (Yamaha YZ125) da ServerStorage > MotoModello, le da' colori e materiali,
+-- la monta sui perni (ruote, sterzo, forcella, forcellone) e ne crea una per ogni giocatore,
+-- vicino a dove nasce. Con E si sale (ProximityPrompt "Sali"), con E si scende.
+-- La guida la fa il MotoClient: qui il server da' al pilota il controllo della fisica.
 -- Nell'Output le righe di questo script iniziano con [Moto].
 
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 local Workspace = game:GetService("Workspace")
 
-local VERSIONE = 1
+local VERSIONE = 2
 
 local function log(...)
 	print("[Moto]", ...)
@@ -23,6 +26,7 @@ local GEOMETRIA = {
 	PernoSterzo = Vector3.new(0, 2.4006, -3.8463),
 	DirSterzo = Vector3.new(0, 0.9136, 0.4066), -- asse dello sterzo verso l'alto (24 gradi)
 	Terra = -1.19, -- altezza del terreno rispetto all'asse dietro
+	Sella = Vector3.new(0, 2.0, -1.45), -- centro del sedile (invisibile) su cui si siede il pilota
 	DistanzaAvanti = 5, -- distanza tra i cubetti RIF_Origine e RIF_Avanti
 	DistanzaSu = 3, -- distanza tra i cubetti RIF_Origine e RIF_Su
 }
@@ -144,8 +148,61 @@ local function costruisciMoto(nome, cfDestinazione)
 	for _, gruppo in ipairs(GRUPPI) do
 		perni[gruppo] = nuovoPerno(gruppo, cfDestinazione * cfPerni[gruppo], moto)
 	end
-	perni.Corpo.Anchored = true
-	moto.PrimaryPart = perni.Corpo
+
+	-- telaio fisico invisibile: e' lui che si muove, tutto il resto e' saldato sopra.
+	-- Sta 1,3 stud sopra il terreno, cosi' non striscia: l'altezza la tiene il client con i raggi.
+	local telaio = Instance.new("Part")
+	telaio.Name = "Telaio"
+	telaio.Size = Vector3.new(1.2, 1.6, 7)
+	telaio.CFrame = cfDestinazione * CFrame.new(0, 0.9, -2.6)
+	telaio.Transparency = 1
+	telaio.CanCollide = true
+	telaio.CanTouch = false
+	telaio.Anchored = true
+	telaio.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0, 0, 100, 1)
+	telaio.Parent = moto
+	local saldaCorpo = Instance.new("WeldConstraint")
+	saldaCorpo.Part0 = telaio
+	saldaCorpo.Part1 = perni.Corpo
+	saldaCorpo.Parent = telaio
+	moto.PrimaryPart = telaio
+
+	local att = Instance.new("Attachment")
+	att.Name = "Centro"
+	att.Parent = telaio
+	local orient = Instance.new("AlignOrientation")
+	orient.Name = "Orientamento"
+	orient.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	orient.Attachment0 = att
+	orient.MaxTorque = math.huge
+	orient.Responsiveness = 60
+	orient.CFrame = telaio.CFrame.Rotation
+	orient.Enabled = false
+	orient.Parent = telaio
+
+	-- sedile invisibile + tasto E per salire
+	local sella = Instance.new("Seat")
+	sella.Name = "Sella"
+	sella.Size = Vector3.new(1, 0.3, 1.6)
+	sella.CFrame = cfDestinazione * CFrame.new(G.Sella)
+	sella.Transparency = 1
+	sella.CanCollide = false
+	sella.CanTouch = false -- niente seduta toccandola per sbaglio: si sale solo con E
+	sella.Massless = true
+	sella.Parent = moto
+	local saldaSella = Instance.new("WeldConstraint")
+	saldaSella.Part0 = telaio
+	saldaSella.Part1 = sella
+	saldaSella.Parent = sella
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "Sali"
+	prompt.ActionText = "Sali"
+	prompt.ObjectText = "Yamaha YZ125"
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = 8
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = sella
 
 	-- 4) sposto, coloro e saldo ogni pezzo al perno del suo gruppo
 	local conta = {}
@@ -230,21 +287,164 @@ if not cartella then
 	cartella.Parent = Workspace
 end
 
--- posizione della vetrina: 14 stud davanti allo SpawnLocation, vista di fianco
-local spawn = Workspace:FindFirstChildWhichIsA("SpawnLocation", true)
-local base = spawn and spawn.Position or Vector3.new(0, 5, 0)
-local pos = base + Vector3.new(0, 0, -14)
-local parametri = RaycastParams.new()
-parametri.FilterType = Enum.RaycastFilterType.Exclude
-parametri.FilterDescendantsInstances = { cartella }
-local colpo = Workspace:Raycast(pos + Vector3.new(0, 50, 0), Vector3.new(0, -200, 0), parametri)
-local yTerra = colpo and colpo.Position.Y or 0
-pos = Vector3.new(pos.X, yTerra - GEOMETRIA.Terra + 0.02, pos.Z)
-local cfVetrina = CFrame.lookAt(pos, pos + Vector3.xAxis)
-
-local moto = costruisciMoto("Moto_Vetrina", cfVetrina)
-if moto then
-	moto:SetAttribute("Demo", true)
-	moto.Parent = cartella
-	log("Versione " .. VERSIONE .. ": vetrina pronta in " .. moto:GetFullName())
+-- evento per scendere con E (lo manda il MotoClient)
+local eventoScendi = ReplicatedStorage:FindFirstChild("MotoScendi")
+if not eventoScendi then
+	eventoScendi = Instance.new("RemoteEvent")
+	eventoScendi.Name = "MotoScendi"
+	eventoScendi.Parent = ReplicatedStorage
 end
+
+local function filtroTerreno(escludi)
+	local p = RaycastParams.new()
+	p.FilterType = Enum.RaycastFilterType.Exclude
+	p.FilterDescendantsInstances = escludi
+	return p
+end
+
+-- CFrame dell'asse dietro con la moto dritta, appoggiata sul terreno sotto "pos", che guarda verso "dir"
+local function cfAppoggiata(pos, dir, escludi)
+	local colpo = Workspace:Raycast(pos + Vector3.new(0, 20, 0), Vector3.new(0, -200, 0), filtroTerreno(escludi))
+	local y = colpo and colpo.Position.Y or pos.Y
+	dir = Vector3.new(dir.X, 0, dir.Z)
+	if dir.Magnitude < 0.01 then
+		dir = Vector3.new(0, 0, -1)
+	end
+	local p = Vector3.new(pos.X, y - GEOMETRIA.Terra + 0.02, pos.Z)
+	return CFrame.lookAt(p, p + dir.Unit)
+end
+
+local function parcheggia(moto)
+	-- la moto si rimette dritta dove si trova e viene bloccata (Anchored)
+	local telaio = moto:FindFirstChild("Telaio")
+	if not telaio then
+		return
+	end
+	local asse = telaio.CFrame * CFrame.new(0, -0.9, 2.6)
+	local escludi = { cartella }
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.Character then
+			table.insert(escludi, p.Character)
+		end
+	end
+	local cf = cfAppoggiata(asse.Position, asse.LookVector, escludi)
+	telaio.Orientamento.Enabled = false
+	telaio.AssemblyLinearVelocity = Vector3.zero
+	telaio.AssemblyAngularVelocity = Vector3.zero
+	telaio.Anchored = true
+	moto:PivotTo(cf * CFrame.new(0, 0.9, -2.6))
+end
+
+local function collegaSella(moto, proprietario)
+	local sella = moto.Sella
+	local telaio = moto.Telaio
+	local prompt = sella.Sali
+
+	prompt.Triggered:Connect(function(giocatore)
+		local char = giocatore.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if not hum or hum.Health <= 0 or sella.Occupant then
+			return
+		end
+		if hum.SeatPart then
+			return
+		end
+		sella:Sit(hum)
+	end)
+
+	sella:GetPropertyChangedSignal("Occupant"):Connect(function()
+		local hum = sella.Occupant
+		if hum then
+			local giocatore = Players:GetPlayerFromCharacter(hum.Parent)
+			prompt.Enabled = false
+			telaio.Anchored = false
+			telaio.Orientamento.CFrame = telaio.CFrame.Rotation
+			telaio.Orientamento.Enabled = true
+			if giocatore then
+				telaio:SetNetworkOwner(giocatore)
+				moto:SetAttribute("Pilota", giocatore.UserId)
+				log(giocatore.Name .. " e' salito su " .. moto.Name .. " (controllo della fisica dato a " .. giocatore.Name .. ")")
+			end
+		else
+			moto:SetAttribute("Pilota", nil)
+			parcheggia(moto)
+			prompt.Enabled = true
+			log("Sceso da " .. moto.Name .. ": moto parcheggiata")
+		end
+	end)
+end
+
+eventoScendi.OnServerEvent:Connect(function(giocatore)
+	local char = giocatore.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hum and hum.SeatPart and hum.SeatPart.Name == "Sella" and hum.SeatPart:IsDescendantOf(cartella) then
+		local seatWeld = hum.SeatPart:FindFirstChild("SeatWeld")
+		if seatWeld then
+			seatWeld:Destroy()
+		end
+		hum.Sit = false
+		local hrp = char:FindFirstChild("HumanoidRootPart")
+		if hrp then
+			-- scende dal lato sinistro della moto
+			hrp.CFrame = hrp.CFrame * CFrame.new(-2.5, 1, 0)
+		end
+	end
+end)
+
+-- una moto per ogni giocatore, 10 stud davanti a dove nasce (la prima volta)
+local function motoDelGiocatore(giocatore)
+	local nome = "Moto_" .. giocatore.Name
+	local esistente = cartella:FindFirstChild(nome)
+	if esistente then
+		return esistente
+	end
+	local char = giocatore.Character
+	local hrp = char and char:WaitForChild("HumanoidRootPart", 5)
+	if not hrp then
+		return nil
+	end
+	local davanti = hrp.CFrame.LookVector
+	local destra = hrp.CFrame.RightVector
+	-- la moto sta di traverso davanti al giocatore, cosi' la vedi di fianco
+	local pos = hrp.Position + davanti * 8 - destra * 2.6
+	local cf = cfAppoggiata(pos, destra, { cartella, char })
+	local moto = costruisciMoto(nome, cf)
+	if not moto then
+		return nil
+	end
+	moto:SetAttribute("Proprietario", giocatore.UserId)
+	moto.Parent = cartella
+	collegaSella(moto, giocatore)
+	log("Versione " .. VERSIONE .. ": creata " .. moto.Name .. ". Avvicinati e premi E per salire.")
+	return moto
+end
+
+Players.PlayerAdded:Connect(function(giocatore)
+	giocatore.CharacterAdded:Connect(function()
+		task.wait(0.5)
+		motoDelGiocatore(giocatore)
+	end)
+	if giocatore.Character then
+		motoDelGiocatore(giocatore)
+	end
+end)
+for _, giocatore in ipairs(Players:GetPlayers()) do
+	task.spawn(function()
+		if giocatore.Character then
+			motoDelGiocatore(giocatore)
+		end
+		giocatore.CharacterAdded:Connect(function()
+			task.wait(0.5)
+			motoDelGiocatore(giocatore)
+		end)
+	end)
+end
+
+Players.PlayerRemoving:Connect(function(giocatore)
+	local moto = cartella:FindFirstChild("Moto_" .. giocatore.Name)
+	if moto then
+		moto:Destroy()
+	end
+end)
+
+log("Server versione " .. VERSIONE .. " avviato")
