@@ -1,7 +1,7 @@
 -- PosaPilota (ModuleScript)
 -- Dove va: ReplicatedStorage  (nome esatto: PosaPilota)
 -- Calcola la posa del pilota seduto sulla moto: bacino sulla sella, mani sulle manopole,
--- piedi sulle pedane, ginocchia piegate, busto in avanti.
+-- piedi sulle pedane, ginocchia piegate e aperte, busto dritto e rilassato (stile bikelife).
 -- Usa le misure VERE del personaggio (lunghezza di braccia e gambe), quindi va bene
 -- per qualsiasi avatar R15, anche se gli manca qualche giunto (es. le caviglie).
 -- Non tocca niente da solo: restituisce i valori "Transform" da scrivere nei Motor6D.
@@ -233,60 +233,91 @@ function Posa.calcola(g, moto, sterzo, dyn)
 	local manD = sterzo * Posa.MANOPOLA
 	local manS = sterzo * Vector3.new(-Posa.MANOPOLA.X, Posa.MANOPOLA.Y, Posa.MANOPOLA.Z)
 
-	-- busto in avanti (guida normale) + movimenti
-	local busto = math.rad(20) + (dyn.busto or 0)
+	-- stile bikelife: busto dritto, appena all'indietro, rilassato (+ movimenti)
+	local busto = -math.rad(4) + (dyn.busto or 0)
 	local rollio = dyn.rollio or 0
 
-	-- dove sedersi: le anche stanno dietro alle pedane (ginocchia in avanti); tra -1,95 e -1,45
-	-- scelgo il punto che lascia le braccia piegate (circa 75% di estensione)
-	local zMigliore, errMin = -1.75, math.huge
-	for k = 0, 10 do
-		local z = -1.95 + k * 0.05
+	-- dove sedersi: seduto indietro sulla sella (stile bikelife), tra -1,80 e -1,20;
+	-- scelgo il punto che lascia le braccia quasi tese (circa 88% di estensione)
+	local zMigliore, errMin = -1.5, math.huge
+	for k = 0, 12 do
+		local z = -1.8 + k * 0.05
 		local hz = Vector3.new(0, 0, z)
 		local spalla = hz + Vector3.new(0, altezzaSella(z) + spessoreCoscia + alzaBusto
 			+ spalleSuVita.Y * math.cos(busto), -spalleSuVita.Y * math.sin(busto))
 		local dist = (spalla - Vector3.new(0, Posa.MANOPOLA.Y, Posa.MANOPOLA.Z)).Magnitude
-		local errore = math.abs(dist - 0.75 * braccio)
+		local errore = math.abs(dist - 0.88 * braccio)
 		if errore < errMin then
 			errMin, zMigliore = errore, z
 		end
 	end
 	local zAnche = zMigliore + (dyn.scivola or 0)
-	-- la sella e' morbida: il pilota ci affonda un po'
-	local yAnche = altezzaSella(zAnche) + spessoreCoscia - 0.08 + (dyn.molleggio or 0)
-	info.zAnche = zAnche
 
-	-- bacino (LowerTorso): appoggiato sulla sella, ruotato col busto per meta'
-	local rotBacino = rotMoto * CFrame.Angles(0, 0, rollio) * CFrame.Angles(-busto * 0.35, 0, 0)
-	local posAnche = moto * Vector3.new(0, yAnche, zAnche)
-	local cfBacino = CFrame.new(posAnche) * rotBacino * CFrame.new(-centroAnche)
+	-- mani: pugno chiuso sulla manopola.
+	-- Dita (-Y della mano) in avanti e in giu' attorno alla manopola, pollice (-Z della mano)
+	-- verso l'interno della moto, punto di presa della mano sulla manopola. Seguono lo sterzo.
+	local rotSterzo = sterzo.Rotation
+	local avantiS = rotSterzo:VectorToWorldSpace(Vector3.new(0, 0, -1))
+	local giuS = rotSterzo:VectorToWorldSpace(Vector3.new(0, -1, 0))
+	local destraS = rotSterzo:VectorToWorldSpace(Vector3.new(1, 0, 0))
+	local dita = (avantiS * 0.55 + giuS * 0.85).Unit
+	local function presa(j1, j2, j3, manopola, lato, nomePresa)
+		local rotMano = ruotaDaBasi(Vector3.new(0, -1, 0), Vector3.new(0, 0, 1), dita, destraS * lato)
+		local att = j3 and j3.Part1:FindFirstChild(nomePresa)
+		local pPresa = att and att.Position or (j3 and Vector3.new(0, -j3.Part1.Size.Y * 0.5, 0))
+		local polso = j3 and (manopola - rotMano:VectorToWorldSpace(pPresa - j3.C1.Position)) or nil
+		local L1, L2 = lunghezze(j1, j2, j3)
+		return { j1 = j1, j2 = j2, j3 = j3, manopola = manopola, lato = lato, rot = rotMano, polso = polso, L = L1 + L2 }
+	end
+	local bD = presa(g.RS, g.RE, g.RW, manD, 1, "RightGripAttachment")
+	local bS = presa(g.LS, g.LE, g.LW, manS, -1, "LeftGripAttachment")
+
+	-- bacino e busto. Se una mano non arriva alla manopola (moto piegata, sterzo girato,
+	-- braccia corte) il pilota si piega in avanti e scivola avanti quanto basta.
+	local cfBacino, cfBusto
+	for _ = 1, 16 do
+		-- la sella e' morbida: il pilota ci affonda un po'
+		local yAnche = altezzaSella(zAnche) + spessoreCoscia - 0.08 + (dyn.molleggio or 0)
+		local rotBacino = rotMoto * CFrame.Angles(0, 0, rollio) * CFrame.Angles(-busto * 0.35, 0, 0)
+		local posAnche = moto * Vector3.new(0, yAnche, zAnche)
+		cfBacino = CFrame.new(posAnche) * rotBacino * CFrame.new(-centroAnche)
+		local rotBusto = rotMoto * CFrame.Angles(0, 0, rollio * 1.3) * CFrame.Angles(-busto, 0, 0)
+		cfBusto, out[g.Waist] = segmento(cfBacino, g.Waist, rotBusto)
+		local troppo = false
+		for _, b in ipairs({ bD, bS }) do
+			local S = (cfBusto * b.j1.C0).Position
+			local bersaglio = b.polso or (b.manopola + (S - b.manopola).Unit * mano)
+			if (bersaglio - S).Magnitude > b.L * 0.96 then
+				troppo = true
+			end
+		end
+		if not troppo then
+			break
+		end
+		busto += math.rad(3)
+		zAnche -= 0.03
+	end
 	out[g.Root] = (hrpCF * g.Root.C0):Inverse() * cfBacino * g.Root.C1
+	info.zAnche = zAnche
+	info.busto = busto
 
-	-- busto (UpperTorso)
-	local rotBusto = rotMoto * CFrame.Angles(0, 0, rollio * 1.3) * CFrame.Angles(-busto, 0, 0)
-	local cfBusto
-	cfBusto, out[g.Waist] = segmento(cfBacino, g.Waist, rotBusto)
-
-	-- testa: guarda avanti
+	-- testa: alta, mento un po' su, sguardo avanti
 	if g.Neck then
-		local rotTesta = rotMoto * CFrame.Angles(0, 0, rollio * 0.6) * CFrame.Angles(-math.rad(6), 0, 0)
+		local rotTesta = rotMoto * CFrame.Angles(0, 0, rollio * 0.4) * CFrame.Angles(math.rad(5), 0, 0)
 		local _, t = segmento(cfBusto, g.Neck, rotTesta)
 		out[g.Neck] = t
 	end
 
-	-- braccia: polso un po' prima della manopola, cosi' la mano la stringe
-	local function braccio1(j1, j2, j3, manopola, lato)
-		local S = (cfBusto * j1.C0).Position
-		local polso = manopola + (S - manopola).Unit * mano
-		local polo = destra * lato * 0.55 + giu * 0.8 - avanti * 0.3
-		-- mano: dorso in su, dita attorno alla manopola
-		local dir = (manopola - S).Unit
-		local rotMano = ruotaDaBasi(Vector3.new(0, -1, 0), Vector3.new(lato, 0, 0), dir, destra * lato)
-		local _, cfMano = arto(out, cfBusto, j1, j2, j3, polso, polo, 1, rotMano)
+	-- braccia quasi tese, gomiti bassi e un po' in fuori
+	local function braccio1(b)
+		local S = (cfBusto * b.j1.C0).Position
+		local polso = b.polso or (b.manopola + (S - b.manopola).Unit * mano)
+		local polo = destra * b.lato * 0.45 + giu * 1.0 - avanti * 0.2
+		local _, cfMano = arto(out, cfBusto, b.j1, b.j2, b.j3, polso, polo, 1, b.rot)
 		return cfMano
 	end
-	local cfManoD = braccio1(g.RS, g.RE, g.RW, manD, 1)
-	local cfManoS = braccio1(g.LS, g.LE, g.LW, manS, -1)
+	local cfManoD = braccio1(bD)
+	local cfManoS = braccio1(bS)
 
 	-- gambe: caviglia sopra la pedana, ginocchia in avanti e un po' in fuori (stringono la moto)
 	local function gamba(j1, j2, j3, lato)
@@ -296,8 +327,9 @@ function Posa.calcola(g, moto, sterzo, dyn)
 		local p = Posa.PEDANA
 		-- appoggio sull'avampiede: il tallone e' un po' alzato
 		local bersaglio = moto * Vector3.new(p.X * lato, p.Y + sopraSuola + 0.08, p.Z + 0.18 + dietro)
-		local polo = avanti * 1.0 + destra * lato * 0.45 - giu * 0.25
-		local rotPiede = rotMoto * CFrame.Angles(-math.rad(12), lato * math.rad(6), 0)
+		-- ginocchia aperte in fuori, punte dei piedi in fuori (stile bikelife)
+		local polo = avanti * 1.0 + destra * lato * 0.9 - giu * 0.2
+		local rotPiede = rotMoto * CFrame.Angles(-math.rad(10), -lato * math.rad(18), 0)
 		arto(out, cfBacino, j1, j2, j3, bersaglio, polo, -1, rotPiede)
 		return bersaglio
 	end
@@ -305,6 +337,7 @@ function Posa.calcola(g, moto, sterzo, dyn)
 	gamba(g.LH, g.LK, g.LA, -1)
 
 	info.manD, info.manS = manD, manS
+	info.cfBusto = cfBusto
 	info.cfManoD, info.cfManoS = cfManoD, cfManoS
 	info.braccio = braccio
 	return out, info

@@ -99,6 +99,11 @@ for _, caso in ipairs(casi) do
 		print(string.format("  sterzo %3d: mani a %.3f / %.3f stud dalle manopole; gomito dx %s; ginocchio dx %s; anca %s",
 			angolo, eD, eS, f(gomitoD), f(ginD), f(ancaD)))
 		controlla(eD < 0.12 and eS < 0.12, "mani lontane dalle manopole")
+		-- la mano deve chiudersi attorno alla manopola: dita in avanti e in giu', non dritte come il braccio
+		local dita = -(p.RH.m[2])
+		local giuM = -(motoCF.m[2])
+		local avM = motoCF.m[3] * -1
+		controlla(dita:Dot(giuM) > 0.6 and dita:Dot(avM) > 0.2, "mano destra non chiusa sulla manopola")
 		controlla(gomitoD.X > 0.55 and gomitoD.X < 1.75, "gomito destro troppo dentro o troppo fuori")
 		if h >= 1.25 then
 			controlla(ginD.Z < ancaD.Z - 0.3, "ginocchio non in avanti rispetto all'anca")

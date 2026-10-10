@@ -14,7 +14,7 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
-local VERSIONE = 4
+local VERSIONE = 5
 local giocatore = Players.LocalPlayer
 local cartella = Workspace:WaitForChild("Moto")
 local eventoScendi = ReplicatedStorage:WaitForChild("MotoScendi")
@@ -217,8 +217,10 @@ local function controllaPosa(char, p, info)
 	local dMano = (puntoMano - info.manD).Magnitude
 	local piede = char:FindFirstChild("RightFoot")
 	local dPiede = piede and (piede.Position - info.caviglia).Magnitude or -1
-	print(string.format("[Moto] Controllo posa %s: mano destra a %.2f stud dalla manopola, piede destro a %.2f dalla pedana (vicino a 0 = giusto)",
-		char.Name, dMano, dPiede))
+	local busto = char:FindFirstChild("UpperTorso")
+	local dBusto = (busto and info.cfBusto) and (busto.Position - info.cfBusto.Position).Magnitude or -1
+	print(string.format("[Moto] Controllo posa %s: mano destra a %.2f stud dalla manopola, piede destro a %.2f dalla pedana, busto a %.2f dal previsto (vicino a 0 = giusto)",
+		char.Name, dMano, dPiede, dBusto))
 	if dMano > 0.6 then
 		local hum = char:FindFirstChildOfClass("Humanoid")
 		local animator = hum and hum:FindFirstChildOfClass("Animator")
