@@ -5,7 +5,8 @@ Gioco Roblox con moto da cross. Si ricomincia da zero.
 - Passo 1 (fatto): la moto 3D (Yamaha YZ125 blu) montata sui perni.
 - Passo 2 (versione 2 degli script): ogni giocatore ha la sua moto, **E** per salire/scendere, guida base **W** gas, **S** freno, **A/D** sterzo, con piega in curva, sospensioni e campo visivo che si allarga con la velocità.
 - Passo 3 (versione 3): corpo slanciato (altezza x1,3, larghezza x0,8) e posa vera del pilota: mani sulle manopole, piedi sulle pedane, ginocchia piegate, busto in avanti; il corpo va indietro accelerando, avanti frenando, dentro le curve e molleggia.
-- Prossimi: impennata con SHIFT, caduta con ragdoll.
+- Versione 7: piega fino a 60°, camera che segue la moto in curva (libera col mouse, torna dietro dopo 1,5 s) e si inclina, sgommata con S in velocità (fumo + righe nere) e burnout con W+S da fermo (A/D per girare sul posto).
+- Prossimi: impennata con SHIFT, caduta con ragdoll, moto 2026 rifatta dalle foto.
 
 ## File
 

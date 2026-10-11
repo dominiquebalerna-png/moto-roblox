@@ -15,7 +15,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 local Workspace = game:GetService("Workspace")
 
-local VERSIONE = 4
+local VERSIONE = 5
 
 local function log(...)
 	print("[Moto]", ...)
@@ -300,6 +300,26 @@ if not cartella then
 	cartella.Parent = Workspace
 end
 
+-- evento delle sgommate: il pilota dice 0 (niente), 1 (ruota bloccata) o 2 (burnout);
+-- lo scrivo come attributo della moto, cosi' tutti vedono fumo e righe nere
+local eventoSgomma = ReplicatedStorage:FindFirstChild("MotoSgomma")
+if not eventoSgomma then
+	eventoSgomma = Instance.new("RemoteEvent")
+	eventoSgomma.Name = "MotoSgomma"
+	eventoSgomma.Parent = ReplicatedStorage
+end
+eventoSgomma.OnServerEvent:Connect(function(giocatore, stato)
+	if type(stato) ~= "number" then
+		return
+	end
+	stato = math.clamp(math.floor(stato), 0, 2)
+	for _, moto in ipairs(cartella:GetChildren()) do
+		if moto:GetAttribute("Pilota") == giocatore.UserId then
+			moto:SetAttribute("Sgomma", stato)
+		end
+	end
+end)
+
 -- evento per scendere con E (lo manda il MotoClient)
 local eventoScendi = ReplicatedStorage:FindFirstChild("MotoScendi")
 if not eventoScendi then
@@ -380,6 +400,7 @@ local function collegaSella(moto, proprietario)
 			end
 		else
 			moto:SetAttribute("Pilota", nil)
+			moto:SetAttribute("Sgomma", 0)
 			parcheggia(moto)
 			prompt.Enabled = true
 			log("Sceso da " .. moto.Name .. ": moto parcheggiata")

@@ -2,6 +2,9 @@
 -- Dove va: StarterPlayer > StarterPlayerScripts
 -- Guida della moto (versione base, senza impennata):
 --   W = gas, S = freno, A / D = sterzo, E = scendi (anche Spazio).
+--   S in velocita' = sgommata (ruota dietro bloccata, riga nera e fumo);
+--   W + S da fermo = burnout (con A / D giri sul posto).
+-- Camera: segue la moto in curva; la puoi girare col mouse, dopo 1,5 s che non la tocchi torna dietro.
 -- Muove anche le parti di TUTTE le moto: ruote che girano, manubrio che sterza,
 -- forcella e forcellone che ammortizzano, piega in curva.
 -- Mette i piloti in posa (ReplicatedStorage > PosaPilota): mani sulle manopole, piedi sulle pedane,
@@ -14,10 +17,12 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
-local VERSIONE = 6
+local VERSIONE = 7
 local giocatore = Players.LocalPlayer
 local cartella = Workspace:WaitForChild("Moto")
 local eventoScendi = ReplicatedStorage:WaitForChild("MotoScendi")
+local eventoSgomma = ReplicatedStorage:WaitForChild("MotoSgomma")
+local TweenService = game:GetService("TweenService")
 local Posa = require(ReplicatedStorage:WaitForChild("PosaPilota"))
 
 -- geometria (uguale al MotoServer), in stud, per la moto a scala 1.
@@ -33,7 +38,7 @@ local ACCEL = 30
 local FRENATA = 55
 local ATTRITO = 3
 local STERZO_MAX = math.rad(32) -- angolo di sterzo da fermo
-local PIEGA_MAX = math.rad(48)
+local PIEGA_MAX = math.rad(60) -- piega massima in curva
 
 local NOMI_GIUNTI = { "Sterzo", "Forcella", "RuotaDavanti", "Forcellone", "RuotaDietro" }
 
@@ -89,6 +94,118 @@ local function molla(x, v, obiettivo, dt, k, c)
 	return x, v
 end
 
+-- ---------------------------------------------------------------- sgommate: fumo e righe nere
+
+local cartellaSegni = Instance.new("Folder")
+cartellaSegni.Name = "SegniGomme" -- solo su questo computer
+cartellaSegni.Parent = Workspace
+local SEGNI_MAX = 400
+local segni = {}
+
+local function filtroSegni()
+	local p = RaycastParams.new()
+	p.FilterType = Enum.RaycastFilterType.Exclude
+	local escludi = { cartella, cartellaSegni }
+	for _, pl in ipairs(Players:GetPlayers()) do
+		if pl.Character then
+			table.insert(escludi, pl.Character)
+		end
+	end
+	p.FilterDescendantsInstances = escludi
+	return p
+end
+
+local function nuovoSegno(a, b, normale, larghezza)
+	local lung = (b - a).Magnitude
+	if lung < 0.05 then
+		return
+	end
+	local s = Instance.new("Part")
+	s.Name = "Segno"
+	s.Anchored = true
+	s.CanCollide = false
+	s.CanQuery = false
+	s.CanTouch = false
+	s.CastShadow = false
+	s.Material = Enum.Material.SmoothPlastic
+	s.Color = Color3.fromRGB(18, 18, 18)
+	s.Transparency = 0.3
+	s.Size = Vector3.new(larghezza, 0.04, lung + 0.1)
+	s.CFrame = CFrame.lookAt((a + b) / 2, b, normale)
+	s.Parent = cartellaSegni
+	table.insert(segni, s)
+	if #segni > SEGNI_MAX then
+		local vecchio = table.remove(segni, 1)
+		vecchio:Destroy()
+	end
+	task.delay(8, function()
+		if s.Parent then
+			local t = TweenService:Create(s, TweenInfo.new(4), { Transparency = 1 })
+			t:Play()
+			t.Completed:Wait()
+			s:Destroy()
+		end
+	end)
+end
+
+local function effettiSgomma(moto, st, sg)
+	local perno = moto:FindFirstChild("Perno_Forcellone")
+	if not perno then
+		return
+	end
+	local k = st.scala
+	if not st.fumo then
+		-- punto in cui la gomma dietro tocca terra (nel sistema del forcellone)
+		local att = Instance.new("Attachment")
+		att.Name = "Fumo"
+		att.Position = Vector3.new(0, (-0.4283 - 1.15) * k, 2.0347 * k)
+		att.Parent = perno
+		local pe = Instance.new("ParticleEmitter")
+		pe.Name = "FumoGomma"
+		pe.Texture = "rbxasset://textures/particles/smoke_main.dds"
+		pe.Color = ColorSequence.new(Color3.fromRGB(240, 240, 240), Color3.fromRGB(205, 205, 205))
+		pe.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1.2 * k), NumberSequenceKeypoint.new(1, 7 * k) })
+		pe.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.45), NumberSequenceKeypoint.new(1, 1) })
+		pe.Lifetime = NumberRange.new(1.5, 3)
+		pe.Speed = NumberRange.new(3, 7)
+		pe.SpreadAngle = Vector2.new(40, 40)
+		pe.EmissionDirection = Enum.NormalId.Back
+		pe.Acceleration = Vector3.new(0, 2.5, 0)
+		pe.Drag = 1.5
+		pe.Rotation = NumberRange.new(0, 360)
+		pe.RotSpeed = NumberRange.new(-40, 40)
+		pe.Enabled = false
+		pe.Parent = att
+		st.fumo, st.attFumo = pe, att
+	end
+	st.fumo.Enabled = sg > 0
+	st.fumo.Rate = sg == 2 and 70 or 30
+	if sg == 0 then
+		st.ultimoSegno = nil
+		return
+	end
+	-- riga nera sull'asfalto
+	local p = st.attFumo.WorldPosition
+	local colpo = Workspace:Raycast(p + Vector3.new(0, 1, 0), Vector3.new(0, -3, 0), filtroSegni())
+	if not colpo then
+		st.ultimoSegno = nil
+		return
+	end
+	local punto = colpo.Position + colpo.Normal * 0.02
+	local larghezza = 0.32 * k
+	if not st.ultimoSegno then
+		st.ultimoSegno, st.tempoSegno = punto, os.clock()
+	elseif (punto - st.ultimoSegno).Magnitude > 0.35 then
+		nuovoSegno(st.ultimoSegno, punto, colpo.Normal, larghezza)
+		st.ultimoSegno, st.tempoSegno = punto, os.clock()
+	elseif sg == 2 and os.clock() - st.tempoSegno > 0.35 then
+		-- burnout fermo: macchia nera sotto la ruota
+		local dietro = st.telaio.CFrame.LookVector * -0.3
+		nuovoSegno(punto - dietro, punto + dietro, colpo.Normal, larghezza * 1.2)
+		st.tempoSegno = os.clock()
+	end
+end
+
 local function aggiornaGrafica(moto, st, dt, mia)
 	local tel = st.telaio
 	local cf = tel.CFrame
@@ -99,7 +216,14 @@ local function aggiornaGrafica(moto, st, dt, mia)
 
 	-- ruote: giro = distanza / raggio (angolo negativo = rotola in avanti)
 	local k = st.scala
-	st.giroDietro -= velAvanti / (R_DIETRO * k) * dt
+	-- sgommata: 1 = ruota dietro bloccata (non gira), 2 = burnout (gira fortissimo)
+	local sg = mia and mia.sgomma or (moto:GetAttribute("Sgomma") or 0)
+	if sg == 2 then
+		st.giroDietro -= 45 * dt
+	elseif sg == 0 then
+		st.giroDietro -= velAvanti / (R_DIETRO * k) * dt
+	end
+	effettiSgomma(moto, st, sg)
 	st.giroDavanti -= velAvanti / (R_DAVANTI * k) * dt
 
 	-- sterzo: per la mia moto uso il comando, per le altre lo stimo dalla rotazione
@@ -339,6 +463,7 @@ local function iniziaGuida(moto)
 		sterzoIn = 0,
 		angoloSterzo = 0,
 		aTerra = true,
+		sgomma = 0,
 		raggi = parametriRaggi(moto),
 		scala = moto:GetAttribute("Scala") or 1,
 		tempoRaggi = 0,
@@ -372,11 +497,15 @@ local function guidaPasso(dt)
 	g.sterzoIn += ((dx - sx) - g.sterzoIn) * math.min(1, dt * 6)
 
 	-- velocita'
+	-- W + S quasi fermo = burnout: la moto resta li' e la ruota dietro gira
+	local burnout = gas > 0 and freno > 0 and math.abs(g.vel) < 8
 	local v = g.vel
-	if gas > 0 then
+	if burnout then
+		v -= math.sign(v) * math.min(math.abs(v), 30 * dt)
+	elseif gas > 0 then
 		v += ACCEL * (1 - math.clamp(v / VEL_MAX, 0, 1)) * dt
 	end
-	if freno > 0 then
+	if freno > 0 and not burnout then
 		if v > 0.5 then
 			v -= FRENATA * dt
 		else
@@ -405,16 +534,41 @@ local function guidaPasso(dt)
 	local cDavanti = Workspace:Raycast(pDavanti + su, giu - su, g.raggi)
 	local aTerra = cDietro ~= nil and (pDietro.Y - cDietro.Position.Y) < rDietro + 0.6
 
+	-- sgommata in frenata: S senza gas a piu' di 10 stud/s, a terra
+	local strisciata = not burnout and freno > 0 and gas == 0 and v > 10 and aTerra
+	local stato = (burnout and aTerra) and 2 or (strisciata and 1 or 0)
+	if stato ~= g.sgomma then
+		g.sgomma = stato
+		eventoSgomma:FireServer(stato)
+	end
+
 	-- sterzo e piega (solo a terra)
-	local sterzoMax = STERZO_MAX / (1 + math.abs(v) / 20)
+	local sterzoMax = STERZO_MAX / (1 + math.abs(v) / 30)
 	g.angoloSterzo = -g.sterzoIn * sterzoMax
 	local yawRate = 0
 	if aTerra then
-		yawRate = v * math.tan(g.angoloSterzo) / passo
+		if stato == 2 then
+			-- burnout: con A / D la ruota dietro gira attorno a quella davanti ("donut")
+			yawRate = -g.sterzoIn * 1.9
+			g.angoloSterzo = -g.sterzoIn * STERZO_MAX
+		else
+			yawRate = v * math.tan(g.angoloSterzo) / passo
+			if stato == 1 then
+				-- ruota dietro bloccata: il dietro scappa un po' e scodinzola
+				yawRate = yawRate * 1.5 + math.sin(os.clock() * 9) * 0.12
+			end
+		end
 	end
 	g.yaw += yawRate * dt
 	local gravita = Workspace.Gravity
-	local piegaOb = aTerra and math.clamp(math.atan(v * yawRate / gravita), -PIEGA_MAX, PIEGA_MAX) or g.piega * 0.98
+	local piegaOb
+	if not aTerra then
+		piegaOb = g.piega * 0.98
+	elseif stato == 2 then
+		piegaOb = yawRate * 0.12
+	else
+		piegaOb = math.clamp(math.atan(v * yawRate / gravita) * 1.25, -PIEGA_MAX, PIEGA_MAX)
+	end
 	g.piega += (piegaOb - g.piega) * math.min(1, dt * 5)
 
 	-- beccheggio dal terreno
@@ -430,6 +584,10 @@ local function guidaPasso(dt)
 		vy = math.clamp((yOb - pDietro.Y) * 18, -40, 60) + v * math.sin(g.beccheggio)
 	end
 	local orizz = avantiPiatto * v * math.cos(g.beccheggio)
+	if stato == 2 then
+		-- nel burnout il dietro gira attorno alla ruota davanti
+		orizz = Vector3.new(0, yawRate, 0):Cross(pDietro - pDavanti)
+	end
 	tel.AssemblyLinearVelocity = Vector3.new(orizz.X, vy, orizz.Z)
 
 	-- orientamento: direzione, beccheggio, piega
@@ -504,6 +662,63 @@ RunService.RenderStepped:Connect(function(dt)
 			liberaPilota(char)
 		end
 	end
+end)
+
+-- ---------------------------------------------------------------- camera
+
+-- La camera resta quella di Roblox (libera). Se per 1,5 secondi non la giri, torna piano dietro
+-- la moto e la segue nelle curve; in piega si inclina un po' insieme alla moto.
+local ATTESA_CAMERA = 1.5
+local ultimoGiroCamera = -math.huge
+
+local function segnaCamera()
+	ultimoGiroCamera = os.clock()
+end
+
+UserInputService.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton2 then
+		segnaCamera()
+	end
+end)
+UserInputService.InputChanged:Connect(function(input, giaUsato)
+	local tipo = input.UserInputType
+	if tipo == Enum.UserInputType.MouseMovement then
+		if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+			or UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter then
+			segnaCamera()
+		end
+	elseif tipo == Enum.UserInputType.Touch then
+		if not giaUsato then
+			segnaCamera()
+		end
+	elseif input.KeyCode == Enum.KeyCode.Thumbstick2 and input.Position.Magnitude > 0.25 then
+		segnaCamera()
+	end
+end)
+
+RunService:BindToRenderStep("MotoCamera", Enum.RenderPriority.Camera.Value + 1, function(dt)
+	local g = guida
+	local cam = Workspace.CurrentCamera
+	if not (g and cam and cam.CameraType == Enum.CameraType.Custom) then
+		return
+	end
+	local fuoco = cam.Focus.Position
+	local cf = cam.CFrame
+	local off = cf.Position - fuoco
+	local piatto = Vector3.new(off.X, 0, off.Z)
+	if piatto.Magnitude < 0.5 then
+		return -- prima persona: non tocco niente
+	end
+	if os.clock() - ultimoGiroCamera > ATTESA_CAMERA and math.abs(g.vel) > 1 then
+		-- angolo attuale della camera attorno al pilota e angolo "dietro la moto"
+		local angCam = math.atan2(piatto.X, piatto.Z)
+		local diff = (g.yaw - angCam + math.pi) % (2 * math.pi) - math.pi
+		local giro = diff * (1 - math.exp(-dt * 2.5))
+		local nuovaPos = fuoco + CFrame.Angles(0, giro, 0):VectorToWorldSpace(off)
+		cf = CFrame.lookAt(nuovaPos, fuoco)
+	end
+	g.rollioCam = (g.rollioCam or 0) + (g.piega * 0.3 - (g.rollioCam or 0)) * math.min(1, dt * 5)
+	cam.CFrame = cf * CFrame.Angles(0, 0, g.rollioCam)
 end)
 
 print("[Moto] Client v" .. VERSIONE .. " avviato")
