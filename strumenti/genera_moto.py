@@ -40,6 +40,8 @@ COLORI = {
     "Argento": (190, 190, 195),
     "Motore": (150, 152, 158),
     "Sella": (24, 24, 26),
+    "SellaBlu": (34, 44, 140),
+    "Titanio": (72, 72, 78),
     "Ciano": (60, 185, 235),
     "Bianco": (235, 235, 235),
     "Disco": (150, 150, 156),
@@ -436,7 +438,7 @@ for xs, dy, dz in ((-1.42, 0.10, 0.30), (-1.05, 0.10, 0.28), (-0.6, 0.05, 0.12),
                    (0.25, 0.0, 0.0), (0.6, 0.05, 0.12), (1.05, 0.10, 0.28), (1.42, 0.10, 0.30)):
     manub.append(morsetti + np.array([xs, dy, dz]))
 aggiungi("Sterzo", "NeroOpaco", tubo(manub, 0.045, lati=10))
-aggiungi("Sterzo", "BluCerchio", scatola(morsetti + [0, 0.06, -0.02], [0.5, 0.1, 0.12]))  # paracolpi
+aggiungi("Sterzo", "Nero", scatola(morsetti + [0, 0.06, -0.02], [0.5, 0.1, 0.12]))  # paracolpi nero col logo
 for s in (-1, 1):
     g0 = morsetti + np.array([s * 1.08, 0.10, 0.285])
     g1 = morsetti + np.array([s * 1.46, 0.10, 0.30])
@@ -522,7 +524,7 @@ espansione = [P3(318, 204, 0.05), P3(338, 200, 0.12), P3(352, 210, 0.2), P3(361,
 raggi_esp = [0.1, 0.13, 0.17, 0.2, 0.2, 0.18, 0.15, 0.12, 0.1, 0.09, 0.09]
 aggiungi("Corpo", "NeroOpaco", tubo(espansione, raggi_esp, lati=14))
 sil = [P3(172, 190, 0.26), P3(96, 143, 0.26)]
-aggiungi("Corpo", "Argento", tubo(sil, [0.155, 0.155], lati=18, smussa=False))
+aggiungi("Corpo", "Titanio", tubo(sil, [0.155, 0.155], lati=18, smussa=False))
 aggiungi("Corpo", "Nero", cilindro(P3(98, 144, 0.26), P3(83, 135, 0.26), 0.15, 18))
 aggiungi("Corpo", "Nero", cilindro(P3(176, 193, 0.26), P3(168, 188, 0.26), 0.16, 18))
 
@@ -566,8 +568,16 @@ def largh_sella(z, y):
 
 
 aggiungi("Corpo", "Sella", piastra(sella, lambda z, y: -largh_sella(z, y), largh_sella, 0.1, 0.1))
+# sopra la sella il rivestimento antiscivolo e' blu scuro (YZ125 2026), i fianchi restano neri
+sella_sopra = [(100, 118.5), (150, 116.5), (200, 118.5), (250, 120.5), (272, 118.5), (290, 111.5), (299, 110.5),
+               (298, 116), (286, 121), (272, 126), (250, 128), (200, 126), (150, 124), (100, 126)]
+aggiungi("Corpo", "SellaBlu", piastra(sella_sopra, lambda z, y: -largh_sella(z, y) - 0.012,
+                                      lambda z, y: largh_sella(z, y) + 0.012, 0.1, 0.1))
 
-paraf_d = [(14, 120), (50, 116), (100, 115), (140, 119), (230, 126), (230, 132), (140, 127), (100, 125), (50, 123), (14, 122)]
+# parafango dietro diviso in due: il "codino" (dalla punta fino a sotto la sella) e' un gruppo a parte,
+# cosi' quando tocca terra in impennata si piega; il resto, sotto la sella, sta nel Corpo
+paraf_d = [(14, 120), (50, 116), (100, 115), (150, 119.5), (150, 126.5), (100, 125), (50, 123), (14, 122)]
+paraf_d_sotto = [(146, 119.5), (230, 126), (230, 132), (146, 126.5)]
 
 
 def largh_paraf_d(z, y):
@@ -577,7 +587,8 @@ def largh_paraf_d(z, y):
     return 0.42 - 0.17 * max(0.0, min(1.0, t))
 
 
-aggiungi("Corpo", "Blu", piastra(paraf_d, lambda z, y: -largh_paraf_d(z, y), largh_paraf_d, 0.03, 0.03))
+aggiungi("Codino", "Blu", piastra(paraf_d, lambda z, y: -largh_paraf_d(z, y), largh_paraf_d, 0.03, 0.03))
+aggiungi("Corpo", "Blu", piastra(paraf_d_sotto, lambda z, y: -largh_paraf_d(z, y), largh_paraf_d, 0.03, 0.03, liscio=False))
 
 fianchetto = [(86, 124), (136, 121), (160, 138), (186, 158), (191, 167), (178, 173), (158, 170), (130, 160),
               (100, 147), (88, 136)]
@@ -670,7 +681,7 @@ for k in range(24):  # mezzo giro attorno alla corona: sopra -> dietro -> sotto
 for k in range(12):  # mezzo giro attorno al pignone: sotto -> davanti -> sopra
     a = math.pi + math.pi * k / 11
     cat.append(pign + [0, r_pign * math.cos(a), r_pign * math.sin(a)])
-aggiungi("Forcellone", "NeroOpaco", tubo(cat, 0.035, lati=6, chiuso=True, smussa=False))
+aggiungi("Forcellone", "Oro", tubo(cat, 0.035, lati=6, chiuso=True, smussa=False))  # catena dorata
 
 # ---------------------------------------------------------------- riferimenti
 

@@ -59,5 +59,13 @@ local function rx(a) local c, s = math.cos(a), math.sin(a); return cf(v3(), { v3
 local function ry(a) local c, s = math.cos(a), math.sin(a); return cf(v3(), { v3(c, 0, -s), v3(0, 1, 0), v3(s, 0, c) }) end
 local function rz(a) local c, s = math.cos(a), math.sin(a); return cf(v3(), { v3(c, s, 0), v3(-s, c, 0), v3(0, 0, 1) }) end
 function CFrame.Angles(x, y, z) return rx(x) * ry(y) * rz(z) end
+function CFrame.fromAxisAngle(asse, ang)
+	local u = asse.Unit
+	local c, s = math.cos(ang), math.sin(ang)
+	local function r(v) -- formula di Rodrigues
+		return v * c + u:Cross(v) * s + u * (u:Dot(v) * (1 - c))
+	end
+	return cf(v3(0, 0, 0), { r(v3(1, 0, 0)), r(v3(0, 1, 0)), r(v3(0, 0, 1)) })
+end
 
 return { Vector3 = Vector3, CFrame = CFrame }

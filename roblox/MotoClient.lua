@@ -4,6 +4,8 @@
 --   W = gas, S = freno, A / D = sterzo, E = scendi (anche Spazio).
 --   S in velocita' = sgommata (ruota dietro bloccata, riga nera e fumo);
 --   W + S da fermo = burnout (con A / D giri sul posto).
+--   SHIFT = colpo di frizione che stacca la ruota davanti; poi l'impennata si tiene con W (su) e S (giu').
+--   Oltre 100 gradi cadi all'indietro (ragdoll), la moto vola via; poi E per risalire.
 -- Camera: segue la moto in curva; la puoi girare col mouse, dopo 1,5 s che non la tocchi torna dietro.
 -- Muove anche le parti di TUTTE le moto: ruote che girano, manubrio che sterza,
 -- forcella e forcellone che ammortizzano, piega in curva.
@@ -17,11 +19,12 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
-local VERSIONE = 7
+local VERSIONE = 8
 local giocatore = Players.LocalPlayer
 local cartella = Workspace:WaitForChild("Moto")
 local eventoScendi = ReplicatedStorage:WaitForChild("MotoScendi")
 local eventoSgomma = ReplicatedStorage:WaitForChild("MotoSgomma")
+local eventoCaduta = ReplicatedStorage:WaitForChild("MotoCaduta")
 local TweenService = game:GetService("TweenService")
 local Posa = require(ReplicatedStorage:WaitForChild("PosaPilota"))
 
@@ -42,9 +45,26 @@ local PIEGA_MAX = math.rad(60) -- piega massima in curva
 
 local NOMI_GIUNTI = { "Sterzo", "Forcella", "RuotaDavanti", "Forcellone", "RuotaDietro" }
 
+-- impennata (angoli in radianti), provata con una simulazione:
+-- SHIFT da solo la stacca di ~15 gradi, SHIFT + W arriva a ~80 gradi in un secondo,
+-- tenendo W il codino tocca terra e dopo qualche secondo si va oltre 100 gradi.
+local IMP = {
+	colpo = 3.0, -- spinta del colpo di frizione (rad/s)
+	equilibrio = math.rad(72), -- punto di equilibrio (baricentro sopra la ruota)
+	gravita = 8, -- quanto la moto vuole tornare giu'
+	gas = 9, -- quanto il gas la alza (cala salendo)
+	freno = 14, -- quanto il freno dietro la riporta giu'
+	smorza = 2.2,
+	codino = math.rad(70.9), -- a questo angolo il codino tocca terra
+	molla = 7, -- quanto il codino a terra frena la salita
+	caduta = math.rad(100),
+	piegaCodino = math.rad(22), -- quanto si piega al massimo il codino
+}
+
 -- ---------------------------------------------------------------- parti mobili (tutte le moto)
 
 local stati = {} -- [moto] = stato grafico
+local guida = nil -- stato della guida quando sono in sella (lo usano anche grafica e posa)
 
 local function statoDi(moto)
 	local st = stati[moto]
@@ -59,6 +79,9 @@ local function statoDi(moto)
 		end
 		g[nome] = j
 	end
+	-- il codino mobile c'e' solo nel modello nuovo (se manca va bene lo stesso)
+	local jc = moto:FindFirstChild("Giunto_Codino", true)
+	g.Codino = (jc and jc:IsA("Motor6D")) and jc or nil
 	local telaio = moto:FindFirstChild("Telaio")
 	if not telaio then
 		return nil
@@ -206,6 +229,37 @@ local function effettiSgomma(moto, st, sg)
 	end
 end
 
+local function scintilleCodino(moto, st, accese)
+	if not st.scintille then
+		local perno = moto:FindFirstChild("Perno_Codino")
+		if not perno then
+			return
+		end
+		local k = st.scala
+		-- punta del codino: nel modello e' a z = +1,15 e y = +2,13 dall'asse dietro,
+		-- il perno del codino e' a z = -0,67 e y = +2,09
+		local att = Instance.new("Attachment")
+		att.Name = "PuntaCodino"
+		att.Position = Vector3.new(0, 0.04 * k, 1.82 * k)
+		att.Parent = perno
+		local pe = Instance.new("ParticleEmitter")
+		pe.Name = "Scintille"
+		pe.LightEmission = 1
+		pe.Color = ColorSequence.new(Color3.fromRGB(255, 220, 120), Color3.fromRGB(255, 110, 20))
+		pe.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.18), NumberSequenceKeypoint.new(1, 0) })
+		pe.Lifetime = NumberRange.new(0.15, 0.4)
+		pe.Speed = NumberRange.new(10, 22)
+		pe.SpreadAngle = Vector2.new(25, 25)
+		pe.EmissionDirection = Enum.NormalId.Back
+		pe.Acceleration = Vector3.new(0, -60, 0)
+		pe.Rate = 140
+		pe.Enabled = false
+		pe.Parent = att
+		st.scintille = pe
+	end
+	st.scintille.Enabled = accese
+end
+
 local function aggiornaGrafica(moto, st, dt, mia)
 	local tel = st.telaio
 	local cf = tel.CFrame
@@ -244,10 +298,24 @@ local function aggiornaGrafica(moto, st, dt, mia)
 	-- il corpo del pilota ha inerzia: quando acceleri resta indietro, quando freni va avanti
 	st.corpo, st.corpoVel = molla(st.corpo, st.corpoVel, math.clamp(st.longit / 60, -1, 1), dt, 60, 9)
 	st.salto, st.saltoVel = molla(st.salto, st.saltoVel, math.clamp(-vert / 400, -0.12, 0.12), dt, 90, 8)
-	local obForc = math.clamp(0.12 - longit * 0.006 + vert * 0.002, 0, 0.75)
-	local obAmm = math.clamp(0.05 + longit * 0.003 + vert * 0.002, 0, 0.45)
+	-- piu' marcate, come nel gioco di riferimento: in frenata la forcella affonda tanto,
+	-- col gas il dietro si schiaccia e il davanti si alza
+	local obForc = math.clamp(0.14 - longit * 0.009 + vert * 0.003, 0, 0.8)
+	local obAmm = math.clamp(0.06 + longit * 0.005 + vert * 0.003, 0, 0.45)
+	-- impennata: per la mia moto la so, per le altre la stimo dall'inclinazione
+	local imp = mia and mia.theta or math.max(0, math.asin(math.clamp(cf.LookVector.Y, -1, 1)) - 0.06)
+	st.theta = imp
+	if imp > 0.05 then
+		obForc = 0 -- ruota davanti in aria: forcella tutta allungata
+		obAmm = 0.22 -- il dietro e' schiacciato
+	end
 	if mia and not mia.aTerra then
 		obForc, obAmm = 0, 0 -- in aria le sospensioni si allungano
+	end
+	if mia and mia.colpoForcella then
+		-- la ruota davanti e' appena atterrata: botta sulla forcella
+		st.forcVel += mia.colpoForcella
+		mia.colpoForcella = nil
 	end
 	st.forc, st.forcVel = molla(st.forc, st.forcVel, obForc, dt, 180, 14)
 	st.amm, st.ammVel = molla(st.amm, st.ammVel, obAmm, dt, 160, 13)
@@ -261,6 +329,13 @@ local function aggiornaGrafica(moto, st, dt, mia)
 	g.Forcella.Transform = CFrame.new(0, st.forc, 0)
 	-- forcellone lungo 2,08 stud (x scala): alzare la ruota di "amm" = ruotarlo di amm/lunghezza
 	g.Forcellone.Transform = CFrame.Angles(-st.amm / (2.08 * k), 0, 0)
+	-- codino: quando in impennata tocca terra si piega verso l'alto
+	local piegaCodino = math.clamp(imp - IMP.codino, 0, IMP.piegaCodino)
+	st.piegaCodino = (st.piegaCodino or 0) + (piegaCodino - (st.piegaCodino or 0)) * math.min(1, dt * 20)
+	if g.Codino then
+		g.Codino.Transform = CFrame.Angles(-st.piegaCodino, 0, 0)
+	end
+	scintilleCodino(moto, st, st.piegaCodino > 0.01 and math.abs(velAvanti) > 4)
 end
 
 -- ---------------------------------------------------------------- posa dei piloti
@@ -386,11 +461,17 @@ local function posaPilota(moto, st, dt)
 	-- piccoli movimenti di equilibrio + piega del corpo dentro la curva
 	local t = os.clock()
 	local piegaMoto = math.asin(math.clamp(cfMoto.RightVector.Y, -1, 1))
+	-- in impennata (come nel video vero) scivola in fondo alla sella e porta il busto in avanti
+	-- rispetto alla moto, cosi' resta quasi dritto rispetto alla strada, braccia tese
+	local imp = st.theta or 0
+	local mia = guida and guida.moto == moto and guida or nil
+	local gasVis = mia and mia.gasVis or (st.longit > 4 and 1 or 0)
 	local dyn = {
-		busto = -st.corpo * math.rad(14) + math.rad(1.2) * math.sin(t * 1.7),
-		scivola = st.corpo * 0.18,
+		busto = -st.corpo * math.rad(7) + math.rad(1.2) * math.sin(t * 1.7) + imp * 0.6,
+		scivola = st.corpo * 0.12 + math.min(imp, 1.2) * 0.3,
 		rollio = piegaMoto * 0.25 + math.rad(0.8) * math.sin(t * 1.3),
 		molleggio = st.salto - (st.amm - 0.05) * 0.4,
+		gas = gasVis,
 	}
 	local ok, trasf, info = pcall(Posa.calcola, p.g, cfMoto, cfSterzo, dyn, st.scala)
 	if not ok then
@@ -425,7 +506,6 @@ end)
 
 -- ---------------------------------------------------------------- guida (solo la mia moto)
 
-local guida = nil -- stato della guida quando sono in sella
 
 local function tasto(...)
 	for _, k in ipairs({ ... }) do
@@ -464,11 +544,16 @@ local function iniziaGuida(moto)
 		angoloSterzo = 0,
 		aTerra = true,
 		sgomma = 0,
+		theta = 0, -- impennata (rad)
+		omega = 0,
+		colpo = false,
+		gasVis = 0,
+		piegaImp = 0,
 		raggi = parametriRaggi(moto),
 		scala = moto:GetAttribute("Scala") or 1,
 		tempoRaggi = 0,
 	}
-	print("[Moto] Sei in sella a " .. moto.Name .. ". W gas, S freno, A/D sterzo, E scendi.")
+	print("[Moto] Sei in sella a " .. moto.Name .. ". W gas, S freno, A/D sterzo, SHIFT impennata, E scendi.")
 end
 
 local function fineGuida()
@@ -480,6 +565,56 @@ local function fineGuida()
 	if cam then
 		cam.FieldOfView = 70
 	end
+end
+
+-- caduta all'indietro: il server stacca il pilota e lancia la moto, qui faccio il ragdoll
+local function cadi()
+	local g = guida
+	if not g or g.caduto then
+		return
+	end
+	g.caduto = true
+	local velMoto = g.telaio.AssemblyLinearVelocity
+	local avanti = g.telaio.CFrame.LookVector
+	print(string.format("[Moto] Caduta! Impennata oltre %d gradi", math.deg(IMP.caduta)))
+	eventoCaduta:FireServer()
+	local char = giocatore.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local sella = g.moto:FindFirstChild("Sella")
+	local w = sella and sella:FindFirstChild("SeatWeld")
+	if w then
+		w:Destroy()
+	end
+	fineGuida()
+	if not (char and hum) then
+		return
+	end
+	-- ragdoll: spengo i giunti animati, restano le articolazioni "a sfera" (BallSocket)
+	local spenti = {}
+	for _, d in ipairs(char:GetDescendants()) do
+		if d:IsA("AnimationConstraint") and d.Enabled then
+			d.Enabled = false
+			table.insert(spenti, d)
+		end
+	end
+	hum:ChangeState(Enum.HumanoidStateType.Physics)
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if hrp then
+		hrp.AssemblyLinearVelocity = velMoto * 0.6 - avanti * 12 + Vector3.new(0, 18, 0)
+		hrp.AssemblyAngularVelocity = hrp.CFrame.RightVector * 6
+	end
+	print(string.format("[Moto] Ragdoll attivo (%d articolazioni sciolte). Ti rialzi tra 2,5 secondi.", #spenti))
+	task.delay(2.5, function()
+		for _, d in ipairs(spenti) do
+			if d.Parent then
+				d.Enabled = true
+			end
+		end
+		if hum.Parent and hum.Health > 0 then
+			hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+		end
+		print("[Moto] Ti sei rialzato: vai alla moto e premi E per risalire")
+	end)
 end
 
 local function guidaPasso(dt)
@@ -495,6 +630,7 @@ local function guidaPasso(dt)
 	local dx = tasto(Enum.KeyCode.D, Enum.KeyCode.Right) and 1 or 0
 	local sx = tasto(Enum.KeyCode.A, Enum.KeyCode.Left) and 1 or 0
 	g.sterzoIn += ((dx - sx) - g.sterzoIn) * math.min(1, dt * 6)
+	g.gasVis += (gas - g.gasVis) * math.min(1, dt * 12) -- la mano destra gira la manopola del gas
 
 	-- velocita'
 	-- W + S quasi fermo = burnout: la moto resta li' e la ruota dietro gira
@@ -535,7 +671,7 @@ local function guidaPasso(dt)
 	local aTerra = cDietro ~= nil and (pDietro.Y - cDietro.Position.Y) < rDietro + 0.6
 
 	-- sgommata in frenata: S senza gas a piu' di 10 stud/s, a terra
-	local strisciata = not burnout and freno > 0 and gas == 0 and v > 10 and aTerra
+	local strisciata = not burnout and freno > 0 and gas == 0 and v > 10 and aTerra and g.theta < 0.05
 	local stato = (burnout and aTerra) and 2 or (strisciata and 1 or 0)
 	if stato ~= g.sgomma then
 		g.sgomma = stato
@@ -553,6 +689,9 @@ local function guidaPasso(dt)
 			g.angoloSterzo = -g.sterzoIn * STERZO_MAX
 		else
 			yawRate = v * math.tan(g.angoloSterzo) / passo
+			if g.theta > 0.05 then
+				yawRate *= 0.35 -- in impennata si gira poco (ruota davanti in aria)
+			end
 			if stato == 1 then
 				-- ruota dietro bloccata: il dietro scappa un po' e scodinzola
 				yawRate = yawRate * 1.5 + math.sin(os.clock() * 9) * 0.12
@@ -572,7 +711,39 @@ local function guidaPasso(dt)
 	g.piega += (piegaOb - g.piega) * math.min(1, dt * 5)
 
 	-- beccheggio dal terreno
-	if aTerra and cDavanti then
+	-- impennata: pendolo rovesciato attorno alla ruota dietro
+	if g.colpo then
+		g.colpo = false
+		if aTerra and g.theta < 0.05 and v > 2 then
+			g.omega += IMP.colpo
+		end
+	end
+	if aTerra and (g.theta > 0 or g.omega > 0) then
+		local th = g.theta
+		local a = -IMP.gravita * math.sin(IMP.equilibrio - th)
+			+ gas * IMP.gas * math.max(0, 1 - th / 1.6)
+			- freno * IMP.freno
+			- IMP.smorza * g.omega
+		if th > IMP.codino then
+			a -= (th - IMP.codino) * IMP.molla + (g.omega > 0 and 2 * g.omega or 0)
+		end
+		g.omega += a * dt
+		g.theta += g.omega * dt
+		if g.theta <= 0 then
+			if g.omega < -1 then
+				g.colpoForcella = math.min(-g.omega * 1.4, 6) -- atterraggio della ruota davanti
+			end
+			g.theta, g.omega = 0, 0
+		end
+		if g.theta > IMP.caduta then
+			cadi()
+			return
+		end
+	end
+	-- un po' di equilibrio laterale in impennata
+	g.piegaImp = g.theta > 0.1 and math.sin(os.clock() * 2.3) * math.rad(2.5) * math.min(g.theta, 1) or 0
+
+	if aTerra and cDavanti and g.theta < 0.05 then
 		local ob = math.atan2(cDavanti.Position.Y - cDietro.Position.Y, passo)
 		g.beccheggio += (ob - g.beccheggio) * math.min(1, dt * 12)
 	end
@@ -591,7 +762,7 @@ local function guidaPasso(dt)
 	tel.AssemblyLinearVelocity = Vector3.new(orizz.X, vy, orizz.Z)
 
 	-- orientamento: direzione, beccheggio, piega
-	g.orient.CFrame = CFrame.Angles(0, g.yaw, 0) * CFrame.Angles(g.beccheggio, 0, 0) * CFrame.Angles(0, 0, g.piega)
+	g.orient.CFrame = CFrame.Angles(0, g.yaw, 0) * CFrame.Angles(g.beccheggio + g.theta, 0, 0) * CFrame.Angles(0, 0, g.piega + g.piegaImp)
 	g.aTerra = aTerra
 
 	-- campo visivo che si allarga con la velocita'
@@ -627,6 +798,9 @@ UserInputService.InputBegan:Connect(function(input, giaUsato)
 	end
 	if input.KeyCode == Enum.KeyCode.E and guida then
 		eventoScendi:FireServer()
+	end
+	if (input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift) and guida then
+		guida.colpo = true -- colpo di frizione: stacca la ruota davanti
 	end
 end)
 

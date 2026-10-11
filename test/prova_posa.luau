@@ -133,6 +133,31 @@ for _, caso in ipairs(casi) do
 		if angolo == 0 then print(string.format("  seduto a z = %.2f, braccio lungo %.2f", info.zAnche, info.braccio)) end
 	end
 end
+-- gas aperto e impennata: la mano deve restare sulla manopola, i piedi sulle pedane
+do
+	print("== gas aperto + impennata a 60 gradi (pilota del gioco)")
+	local K = 1.08
+	local g = rig(1.15, 0.8, 0.8, true, 1.22, 0.72)
+	for _, caso in ipairs({ { 0, 0 }, { 60, 1 }, { 85, 1 } }) do
+		local th = math.rad(caso[1])
+		local moto = CFrame.new(0, 2, 0) * CFrame.Angles(th, 0, 0)
+		g.hrp.CFrame = moto * CFrame.new(0, 3.5, -1.5)
+		local asse = CFrame.fromMatrix(Vector3.new(0, 2.4006, -3.8463) * K, Vector3.new(1, 0, 0), Vector3.new(0, 0.9136, 0.4066))
+		local sterzo = moto * asse * asse:Inverse()
+		local dyn = { busto = th * 0.6, scivola = math.min(th, 1.2) * 0.3, rollio = 0, gas = caso[2] }
+		local T, info = Posa.calcola(g, moto, sterzo, dyn, K)
+		local p = fk(g, T)
+		local eD = ((p.RH * Vector3.new(0, -0.15 * 1.15 * 0.72, 0)) - info.manD).Magnitude
+		local eS = ((p.LH * Vector3.new(0, -0.15 * 1.15 * 0.72, 0)) - info.manS).Magnitude
+		local eC = ((p.RF * g.RA.C1.Position) - info.caviglia).Magnitude
+		local busto = math.deg(math.asin(math.clamp(-(p.UT.m[2]):Dot(Vector3.new(0, 0, 1)), -1, 1)))
+		print(string.format("  impennata %d, gas %d: mani a %.3f / %.3f, caviglia a %.3f, busto inclinato in avanti (rispetto alla strada) %.0f gradi",
+			caso[1], caso[2], eD, eS, eC, busto))
+		controlla(eD < 0.12 and eS < 0.12, "mani lontane dalle manopole (impennata/gas)")
+		controlla(eC < 0.15, "piede lontano dalla pedana (impennata)")
+	end
+end
+
 print(errori == 0 and "TUTTO OK" or ("ERRORI: " .. errori))
 
 -- JSON con le parti del pilota (moto ferma nell'origine) per disegnarlo sopra il modello 3D

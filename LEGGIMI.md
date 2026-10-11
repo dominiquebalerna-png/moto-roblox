@@ -6,7 +6,8 @@ Gioco Roblox con moto da cross. Si ricomincia da zero.
 - Passo 2 (versione 2 degli script): ogni giocatore ha la sua moto, **E** per salire/scendere, guida base **W** gas, **S** freno, **A/D** sterzo, con piega in curva, sospensioni e campo visivo che si allarga con la velocità.
 - Passo 3 (versione 3): corpo slanciato (altezza x1,3, larghezza x0,8) e posa vera del pilota: mani sulle manopole, piedi sulle pedane, ginocchia piegate, busto in avanti; il corpo va indietro accelerando, avanti frenando, dentro le curve e molleggia.
 - Versione 7: piega fino a 60°, camera che segue la moto in curva (libera col mouse, torna dietro dopo 1,5 s) e si inclina, sgommata con S in velocità (fumo + righe nere) e burnout con W+S da fermo (A/D per girare sul posto).
-- Prossimi: impennata con SHIFT, caduta con ragdoll, moto 2026 rifatta dalle foto.
+- Versione 8: impennata (SHIFT stacca, W su, S giù), codino che tocca terra e si piega con scintille, caduta oltre 100° con ragdoll e moto che si ribalta, mano destra che gira il gas, sospensioni più marcate, modello aggiornato alla YZ125 2026 (sella blu sopra, silenziatore scuro, catena dorata, paracolpi nero, codino separato).
+- Prossimi: suono del motore, grafiche "YZ", monete e moltiplicatore.
 
 ## File
 
@@ -28,7 +29,7 @@ Nella cartella `studio/` ci sono `MotoServer.rbxmx`, `MotoClient.rbxmx`, `PosaPi
 
 - Misure prese dalla foto: passo 1443 mm, 1 stud = 0,28 m, ruota dietro 19", davanti 21".
 - Origine = asse della ruota dietro, davanti = −Z, su = +Y, destra = +X. Terreno a Y = −1,19.
-- Ogni pezzo si chiama `Gruppo_Colore`. Gruppi: `Corpo`, `Sterzo`, `Forcella`, `RuotaDavanti`, `Forcellone`, `RuotaDietro`.
+- Ogni pezzo si chiama `Gruppo_Colore`. Gruppi: `Corpo`, `Sterzo`, `Forcella`, `RuotaDavanti`, `Forcellone`, `RuotaDietro`, `Codino`.
 - Tre cubetti `RIF_Origine`, `RIF_Avanti` (5 stud avanti), `RIF_Su` (3 stud su) servono allo script per rimettere scala e rotazione giuste dopo l'importazione.
 
 Per rigenerare il modello: `pip install trimesh shapely mapbox-earcut numpy` e poi `python3 strumenti/genera_moto.py`.

@@ -268,8 +268,13 @@ function Posa.calcola(g, moto, sterzo, dyn, scala)
 	local destraS = rotSterzo:VectorToWorldSpace(Vector3.new(1, 0, 0))
 	local suS = -giuS
 	-- orienta la mano: dita (-Y) lungo "dir", dorso della mano (X verso l'esterno a riposo) verso l'alto
+	-- gas: la mano destra gira la manopola verso di se' (fino a 28 gradi con gas tutto aperto)
+	local giroGas = math.rad(28) * math.clamp(dyn.gas or 0, 0, 1)
 	local function orientaMano(b, dir)
 		b.rot = ruotaDaBasi(Vector3.new(0, -1, 0), Vector3.new(b.lato, 0, 0), dir, suS)
+		if b.lato == 1 and giroGas > 0 then
+			b.rot = CFrame.fromAxisAngle(destraS, giroGas) * b.rot
+		end
 		if b.j3 then
 			b.polso = b.manopola - b.rot:VectorToWorldSpace(b.pPresa - b.j3.C1.Position)
 		end
